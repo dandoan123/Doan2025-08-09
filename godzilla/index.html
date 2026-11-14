@@ -1,0 +1,824 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#000000">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}[hidden]{display:none!important}</style>
+<title>Atomic Breath</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: one full-bleed night stage; a whisper of HUD in the corners, nothing else competes with the kaiju. */
+:root {
+  --night: #000000;
+  --panel: #04070b;
+  --rule: #142030;
+  --ink: #c2d3e6;
+  --mute: #4f6178;
+  --atom: #46a6ff;
+  --atom-hot: #bfe9ff;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+html { box-sizing: border-box; height: 100%; overflow: hidden; background: var(--night); }
+*, *::before, *::after { box-sizing: inherit; }
+body { height: 100%; margin: 0; overflow: hidden; background: var(--night); color: var(--ink); font-family: var(--mono); -webkit-font-smoothing: antialiased; }
+
+.stage { position: relative; height: 100%; overflow: hidden; touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
+.stage.dragging { cursor: grabbing; }
+.stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#glow { filter: blur(6px) saturate(1.5) brightness(1.4); opacity: 0.85; pointer-events: none; }
+
+.hud { position: absolute; font-size: 11px; line-height: 1.55; color: var(--mute); pointer-events: none; letter-spacing: 0.03em; font-variant-numeric: tabular-nums; }
+.hud b { font-weight: 400; color: var(--ink); }
+.hud-tr { top: 12px; right: max(16px, env(safe-area-inset-right, 0px)); display: grid; justify-items: end; gap: 1px; }
+.hud .phase { color: var(--atom-hot); text-transform: uppercase; letter-spacing: 0.12em; }
+.dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--atom); margin-right: 6px; vertical-align: 1px; box-shadow: 0 0 6px var(--atom); }
+.bar { display: inline-block; width: 70px; height: 3px; margin: 0 7px; vertical-align: 3px; background: var(--rule); position: relative; overflow: hidden; }
+.bar i { position: absolute; left: 0; top: 0; bottom: 0; width: 0; background: var(--atom); box-shadow: 0 0 6px var(--atom); }
+
+.controls { position: absolute; top: 8px; left: max(16px, env(safe-area-inset-left, 0px)); display: flex; gap: 6px; }
+.controls button {
+  font: inherit; font-size: 11px; letter-spacing: 0.03em; color: var(--ink);
+  background: var(--panel); border: 1px solid var(--rule); border-radius: 3px;
+  padding: 5px 9px; cursor: pointer; opacity: 0.75; transition: opacity 0.2s;
+}
+.controls button:hover { opacity: 1; }
+.controls .k { color: var(--atom); margin-right: 4px; }
+button:focus-visible { outline: 1px solid var(--atom); outline-offset: 2px; }
+.hint { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); font-size: 11px; color: var(--mute); pointer-events: none; white-space: nowrap; transition: opacity 0.8s; }
+.hint.gone { opacity: 0; }
+
+@media (max-width: 560px) {
+  .controls .lbl { display: none; }
+  .controls .k { margin-right: 0; }
+}
+@media (prefers-reduced-motion: reduce) { .hint { transition: none; } }
+</style>
+</head>
+<body>
+<div class="stage" id="stage">
+  <canvas id="glow" aria-hidden="true"></canvas>
+  <canvas id="scene" role="img" aria-label="A kaiju made of ASCII characters stands with its back to you in a dark ruined city. Blue light charges up its dorsal plates from tail to head, it fires an atomic breath into the sky, and the blast turns into falling snow."></canvas>
+
+  <div class="controls">
+    <button id="btn-replay" type="button" aria-label="Replay"><span class="k">↻</span><span class="lbl">replay</span></button>
+    <button id="btn-full" type="button" aria-label="Fullscreen"><span class="k">⤢</span><span class="lbl">fullscreen</span></button>
+  </div>
+
+  <div class="hud hud-tr">
+    <div><span class="dot"></span>t <b id="hud-t">0.0</b>s</div>
+    <div class="phase" id="hud-phase">dormant</div>
+    <div>charge<span class="bar"><i id="hud-bar"></i></span><b id="hud-charge">0</b>%</div>
+  </div>
+  <div class="hint" id="hint">drag to look around</div>
+</div>
+
+<script>
+'use strict';
+
+// ── timeline (seconds) ─────────────────────────────────────
+const T_CHARGE = 1.2, T_REVEAL = 8.4, T_FIRE = 9.6, T_BOOM = 10.0, T_FIRE_END = 13.4, T_SNOW = 11.2;
+
+// ── camera: behind the kaiju, a little above, three-quarter rear ──
+const PITCH = 0.24, YC = 0.5, BASE_YAW = -0.5;
+const COS_P = Math.cos(PITCH), SIN_P = Math.sin(PITCH);
+const [LX, LY, LZ] = norm3(-0.55, 0.65, 0.35);          // cold moonlight from the upper left
+const TAU = Math.PI * 2;
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const MONO = '"JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace';
+
+const C = s => s.charCodeAt(0);
+const HIDE = '.,:;-=+*x%#';                              // rough hide, dim → dense; the dense glyphs are kept for the plates
+const HIDE_CODES = Array.from(HIDE, C), HIDE_LEN = HIDE.length;
+const CLOUD_CODES = Array.from('.:;+*', C);
+const C_STAR = C('*'), C_PLUS = C('+'), C_DOT = C('.'), C_AT = C('@'), C_HASH = C('#');
+const C_PCT = C('%'), C_X = C('x'), C_EQ = C('='), C_COLON = C(':'), C_COMMA = C(',');
+
+const K_BODY = 0, K_PLATE = 1, K_GROUND = 2, K_BLDG = 3;
+
+// spine from tail tip to snout: x, y, z, half-width, half-height (the kaiju faces −z)
+const SPINE = [
+  [0.30, 0.022, 0.86, 0.012, 0.011],
+  [0.20, 0.030, 0.92, 0.024, 0.022],
+  [0.04, 0.045, 0.85, 0.040, 0.037],
+  [-0.10, 0.070, 0.66, 0.062, 0.057],
+  [-0.09, 0.150, 0.42, 0.092, 0.085],
+  [0.00, 0.310, 0.17, 0.200, 0.150],
+  [0.00, 0.520, 0.05, 0.225, 0.170],
+  [0.00, 0.700, -0.02, 0.190, 0.150],
+  [0.00, 0.820, -0.08, 0.100, 0.095],
+  [0.00, 0.905, -0.17, 0.086, 0.080],
+  [0.00, 0.920, -0.28, 0.066, 0.056],
+  [0.00, 0.905, -0.37, 0.036, 0.032],
+];
+const PIVOT = [0, 0.79, -0.05];                           // the neck bends here when it rears back
+const LEG = [[-0.14, 0.36, 0.10, 0.12], [-0.20, 0.22, 0.05, 0.11], [-0.19, 0.10, 0.02, 0.075], [-0.18, 0.04, -0.01, 0.065]];
+const ARM = [[-0.15, 0.68, -0.05, 0.045], [-0.21, 0.59, -0.10, 0.037], [-0.20, 0.51, -0.18, 0.028]];
+// ruined blocks: centre x, centre z, half width, half depth, height, broken top
+const BUILDINGS = [
+  [-1.30, -1.90, 0.20, 0.15, 0.95, 1], [-1.70, -2.70, 0.25, 0.25, 0.75, 1], [-0.45, -3.10, 0.30, 0.20, 1.20, 0],
+  [0.45, -3.40, 0.25, 0.25, 0.85, 1], [1.10, -2.30, 0.18, 0.18, 1.05, 0], [1.75, -3.00, 0.25, 0.20, 0.80, 0],
+];
+
+// ── palette: every family ramps dark → saturated → pale ────
+const FAMILIES = {
+  hide:  ['#040505', '#3c4441', '#b8c2bc'],
+  bone:  ['#060707', '#5a605e', '#d6dcd8'],
+  atom:  ['#020a24', '#2b86ff', '#cfeaff'],
+  core:  ['#0a2238', '#7ee3ff', '#ffffff'],
+  ember: ['#1e0700', '#ff7417', '#ffd9a0'],
+  stone: ['#040507', '#343c48', '#a2adbd'],
+  cloud: ['#020510', '#1a2e58', '#9cc2ff'],
+  snow:  ['#070a10', '#6b7891', '#f4f8ff'],
+  ash:   ['#050505', '#3b3a38', '#aaa59c'],
+};
+const LEVELS = 16, F = {}, COLORS = [];
+for (const [name, stops] of Object.entries(FAMILIES)) {
+  F[name] = COLORS.length / LEVELS;
+  const [a, b, c] = stops.map(hexRgb);
+  for (let l = 0; l < LEVELS; l++) {
+    const s = l / (LEVELS - 1);
+    const [p, q, u] = s < 0.6 ? [a, b, s / 0.6] : [b, c, (s - 0.6) / 0.4];
+    COLORS.push('rgb(' + p.map((v, j) => Math.round(v + (q[j] - v) * u)).join(',') + ')');
+  }
+}
+
+// ── page state ─────────────────────────────────────────────
+const stage = document.getElementById('stage');
+const canvas = document.getElementById('scene'), ctx = canvas.getContext('2d');
+const glow = document.getElementById('glow'), gctx = glow.getContext('2d');
+const atlas = document.createElement('canvas'), actx = atlas.getContext('2d');
+
+let W = 1, H = 1, dpr = 1, cols = 1, rows = 1, cellW = 6, lineH = 10, fontPx = 8;
+let scale = 1, cx = 0, cy = 0, DIST = 3.3, rot = BASE_YAW, cr = 1, sr = 0, rotUser = 0, drag = null, dragged = false;
+let chr = new Uint16Array(1), clr = new Uint8Array(1), zb = new Float32Array(1);
+let P = null, SP = null, flakes = [], embers = [], sparks = [], noise = null;
+let t0 = performance.now(), last = t0, t = 0, boomDone = false, boomAt = [0, 0], beamLen = 4;
+
+// ── helpers ────────────────────────────────────────────────
+function norm3(x, y, z) { const l = Math.hypot(x, y, z) || 1; return [x / l, y / l, z / l]; }
+function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+function smooth(p) { p = clamp(p, 0, 1); return p * p * (3 - 2 * p); }
+function hexRgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
+function tint(f, b) { return f * LEVELS + clamp(Math.round(b * (LEVELS - 1)), 0, LEVELS - 1); }
+function hash(a, b, c) { const s = Math.sin(a * 127.1 + b * 311.7 + c * 74.7) * 43758.5453; return s - Math.floor(s); }
+function cross(a, b) { return [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]]; }
+function rotateAbout(v, k, a) {                          // Rodrigues: v around unit axis k
+  const c = Math.cos(a), s = Math.sin(a), d = (k[0] * v[0] + k[1] * v[1] + k[2] * v[2]) * (1 - c), kv = cross(k, v);
+  return [v[0] * c + kv[0] * s + k[0] * d, v[1] * c + kv[1] * s + k[1] * d, v[2] * c + kv[2] * s + k[2] * d];
+}
+function headWeight(u) { return smooth((u - 0.8) / 0.1); }
+function plateHeight(u) { return 0.04 + 0.05 * smooth(u / 0.5) + 0.17 * Math.exp(-(((u - 0.66) / 0.13) ** 2)); }
+
+function put(col, row, code, color, z) {
+  if (col < 0 || row < 0 || col >= cols || row >= rows) return;
+  const i = row * cols + col;
+  if (z <= zb[i]) return;
+  zb[i] = z; chr[i] = code; clr[i] = color;
+}
+
+// world → [screen x, screen y, depth, perspective], or null behind the camera
+function proj(x, y, z) {
+  const xr = x * cr + z * sr, zr = z * cr - x * sr, y0 = y - YC;
+  const yc = y0 * COS_P - zr * SIN_P, zc = y0 * SIN_P + zr * COS_P;
+  if (zc > DIST - 0.2) return null;
+  const p = DIST / (DIST - zc);
+  return [cx + xr * p * scale, cy - yc * p * scale, zc, p];
+}
+
+// ── glyph atlas: each (char, colour) drawn once, then blitted ──
+const SLOTS_X = 64, SLOTS_Y = 64;
+let slotW = 1, slotH = 1, pad = 1, slotNext = 0, slots = new Int16Array(0);
+
+function resetAtlas() {
+  pad = Math.ceil(dpr);
+  slotW = Math.ceil(cellW * dpr) + pad * 2;
+  slotH = Math.ceil(lineH * dpr) + pad * 2;
+  atlas.width = slotW * SLOTS_X; atlas.height = slotH * SLOTS_Y;
+  actx.font = fontPx * dpr + 'px ' + MONO;
+  actx.textAlign = 'center'; actx.textBaseline = 'middle';
+  slots = new Int16Array(COLORS.length * 128).fill(-1);
+  slotNext = 0;
+}
+function glyph(code, color) {
+  const key = color * 128 + (code & 127);
+  let s = slots[key];
+  if (s >= 0) return s;
+  if (slotNext >= SLOTS_X * SLOTS_Y) { actx.clearRect(0, 0, atlas.width, atlas.height); slots.fill(-1); slotNext = 0; }
+  s = slotNext++;
+  actx.fillStyle = COLORS[color];
+  actx.fillText(String.fromCharCode(code), (s % SLOTS_X) * slotW + slotW / 2, ((s / SLOTS_X) | 0) * slotH + slotH / 2);
+  slots[key] = s;
+  return s;
+}
+
+// ── the spine: a smooth curve with a frame at every sample ──
+function buildSpine() {
+  const K = SPINE.length, per = 36, pts = [];
+  for (let i = 0; i < K - 1; i++) {
+    const p0 = SPINE[Math.max(0, i - 1)], p1 = SPINE[i], p2 = SPINE[i + 1], p3 = SPINE[Math.min(K - 1, i + 2)];
+    for (let j = 0; j < per; j++) {
+      const s = j / per;
+      pts.push(p1.map((_, k) => 0.5 * (2 * p1[k] + (p2[k] - p0[k]) * s
+        + (2 * p0[k] - 5 * p1[k] + 4 * p2[k] - p3[k]) * s * s + (3 * p1[k] - p0[k] - 3 * p2[k] + p3[k]) * s * s * s)));
+    }
+  }
+  pts.push(SPINE[K - 1].slice());
+  const n = pts.length, len = [0];
+  for (let i = 1; i < n; i++) len.push(len[i - 1] + Math.hypot(pts[i][0] - pts[i - 1][0], pts[i][1] - pts[i - 1][1], pts[i][2] - pts[i - 1][2]));
+  SP = pts.map((p, i) => {
+    const a = pts[Math.max(0, i - 1)], b = pts[Math.min(n - 1, i + 1)];
+    const T = norm3(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+    const N = norm3(-T[1] * T[0], 1 - T[1] * T[1], -T[1] * T[2]);
+    return { x: p[0], y: p[1], z: p[2], hw: p[3], hh: p[4], T, N, B: cross(T, N), u: len[i] / len[n - 1], s: len[i] };
+  });
+}
+function spineAt(u) {
+  let lo = 0, hi = SP.length - 1;
+  while (hi - lo > 1) { const m = (lo + hi) >> 1; if (SP[m].u < u) lo = m; else hi = m; }
+  const a = SP[lo], b = SP[hi], f = clamp((u - a.u) / Math.max(1e-6, b.u - a.u), 0, 1);
+  const L = (p, q) => p + (q - p) * f, V = (p, q) => [L(p[0], q[0]), L(p[1], q[1]), L(p[2], q[2])];
+  return { x: L(a.x, b.x), y: L(a.y, b.y), z: L(a.z, b.z), hw: L(a.hw, b.hw), hh: L(a.hh, b.hh), T: V(a.T, b.T), N: V(a.N, b.N), B: V(a.B, b.B), u };
+}
+
+// ── layout ─────────────────────────────────────────────────
+function layout() {
+  const box = stage.getBoundingClientRect();
+  W = Math.max(1, box.width); H = Math.max(1, box.height);
+  dpr = Math.min(window.devicePixelRatio || 1, 3);
+  canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+  glow.width = Math.max(1, Math.round(W / 2)); glow.height = Math.max(1, Math.round(H / 2));
+  lineH = clamp(H / 105, 5.5, 14);
+  fontPx = lineH / 1.22;
+  ctx.font = fontPx + 'px ' + MONO;
+  cellW = ctx.measureText('M').width || fontPx * 0.6;
+  cols = Math.ceil(W / cellW); rows = Math.ceil(H / lineH);
+  chr = new Uint16Array(cols * rows); clr = new Uint8Array(cols * rows); zb = new Float32Array(cols * rows);
+  scale = Math.min(H * 0.5, W * 0.95);
+  resetAtlas(); buildScene(); makeParticles();
+}
+
+// ── the scene: every visible thing is a 3D point ───────────
+function buildScene() {
+  const sx = cellW / scale, sy = lineH / scale, cell = sx * sy;
+  const Q = { kind: [], x: [], y: [], z: [], nx: [], ny: [], nz: [], u: [], top: [], w: [], ch: [] };
+  const add = (kind, x, y, z, n, u, top, w, ch) => {
+    Q.kind.push(kind); Q.x.push(x); Q.y.push(y); Q.z.push(z);
+    Q.nx.push(n[0]); Q.ny.push(n[1]); Q.nz.push(n[2]);
+    Q.u.push(u); Q.top.push(top); Q.w.push(w); Q.ch.push(ch);
+  };
+
+  // hide over the spine: tail, torso, neck and head, sampled by surface area
+  const cdf = [];
+  let acc = 0;
+  for (let i = 0; i < SP.length - 1; i++) { acc += (SP[i + 1].s - SP[i].s) * Math.PI * (SP[i].hw + SP[i].hh); cdf.push(acc); }
+  const nBody = clamp(Math.round(acc / cell * 2.6), 4000, 40000);
+  for (let k = 0; k < nBody; k++) {
+    const target = Math.random() * acc;
+    let lo = 0, hi = cdf.length - 1;
+    while (lo < hi) { const m = (lo + hi) >> 1; if (cdf[m] < target) lo = m + 1; else hi = m; }
+    const q = spineAt(SP[lo].u + Math.random() * (SP[lo + 1].u - SP[lo].u));
+    const th = Math.random() * TAU, ct = Math.cos(th), st = Math.sin(th), bump = 1 + (Math.random() - 0.5) * 0.14;
+    const ox = q.hw * ct * bump, oy = q.hh * st * bump;
+    const n = norm3(ct / q.hw * q.B[0] + st / q.hh * q.N[0], ct / q.hw * q.B[1] + st / q.hh * q.N[1], ct / q.hw * q.B[2] + st / q.hh * q.N[2]);
+    add(K_BODY, q.x + ox * q.B[0] + oy * q.N[0], q.y + ox * q.B[1] + oy * q.N[1], q.z + ox * q.B[2] + oy * q.N[2],
+        n, q.u, Math.max(0, st), headWeight(q.u), 0);
+  }
+
+  // legs and arms: tapered tubes with a ball at every joint
+  const blob = (x, y, z, rx, ry, rz, u) => {
+    const count = clamp(Math.round(4 * Math.PI * (rx * ry + rx * rz + ry * rz) / 3 / cell * 2.6), 12, 4000);
+    for (let k = 0; k < count; k++) {
+      const u1 = Math.random() * 2 - 1, a = Math.random() * TAU, s = Math.sqrt(1 - u1 * u1);
+      const d = [s * Math.cos(a), u1, s * Math.sin(a)];
+      add(K_BODY, x + d[0] * rx, y + d[1] * ry, z + d[2] * rz, norm3(d[0] / rx, d[1] / ry, d[2] / rz), u, Math.max(0, d[1]) * 0.3, 0, 0);
+    }
+  };
+  const limb = (ctrl, u, mirror) => {
+    const pts = ctrl.map(p => [mirror ? -p[0] : p[0], p[1], p[2], p[3]]);
+    pts.forEach(p => blob(p[0], p[1], p[2], p[3], p[3], p[3], u));
+    for (let i = 0; i < pts.length - 1; i++) {
+      const a = pts[i], b = pts[i + 1], T = norm3(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+      const N = Math.abs(T[1]) > 0.95 ? norm3(1 - T[0] * T[0], -T[0] * T[1], -T[0] * T[2]) : norm3(-T[1] * T[0], 1 - T[1] * T[1], -T[1] * T[2]);
+      const B = cross(T, N), len = Math.hypot(b[0] - a[0], b[1] - a[1], b[2] - a[2]);
+      const count = clamp(Math.round(len * Math.PI * (a[3] + b[3]) / cell * 2.6), 20, 6000);
+      for (let k = 0; k < count; k++) {
+        const f = Math.random(), th = Math.random() * TAU, ct = Math.cos(th), st = Math.sin(th);
+        const r = (a[3] + (b[3] - a[3]) * f) * (1 + (Math.random() - 0.5) * 0.14);
+        const n = [ct * B[0] + st * N[0], ct * B[1] + st * N[1], ct * B[2] + st * N[2]];
+        add(K_BODY, a[0] + (b[0] - a[0]) * f + r * n[0], a[1] + (b[1] - a[1]) * f + r * n[1], a[2] + (b[2] - a[2]) * f + r * n[2],
+            n, u, Math.max(0, n[1]) * 0.3, 0, 0);
+      }
+    }
+  };
+  for (const m of [false, true]) {
+    limb(LEG, 0.5, m);
+    blob(m ? 0.18 : -0.18, 0.03, -0.07, 0.07, 0.035, 0.095, 0.5);         // feet
+    limb(ARM, 0.76, m);
+    blob(m ? 0.19 : -0.19, 0.49, -0.21, 0.03, 0.025, 0.03, 0.76);          // hands
+  }
+
+  // dorsal plates: three jagged rows, biggest over the middle of the back
+  const total = SP[SP.length - 1].s;
+  const plate = (u, side, h, bw) => {
+    const q = spineAt(u), rise = norm3(q.N[0] * 0.6, q.N[1] * 0.6 + 0.4, q.N[2] * 0.6);
+    const Up = rotateAbout(rise, q.T, side * 0.6 + (Math.random() - 0.5) * 0.15);
+    const lift = side ? 0.7 : 0.85, lat = side * 0.42 * q.hw;
+    const base = [q.x + q.N[0] * q.hh * lift + q.B[0] * lat, q.y + q.N[1] * q.hh * lift + q.B[1] * lat, q.z + q.N[2] * q.hh * lift + q.B[2] * lat];
+    const A = rotateAbout(q.T, Up, (Math.random() - 0.5) * 0.9), Np = cross(Up, A);
+    const thick = bw * 0.38, seed = Math.random() * 6;
+    const count = clamp(Math.round(h * (bw + thick) * 2.2 / cell * 1.6), 10, 1600);
+    for (let k = 0, tries = 0; k < count && tries < count * 4; tries++) {
+      const v = Math.random(), a = Math.random() * 2 - 1, th = Math.random() * 2 - 1;
+      const half = Math.pow(1 - v, 1.2) * (0.65 + 0.35 * Math.abs(Math.sin(v * Math.PI * 3 + seed)));
+      if (Math.abs(a) > half) continue;
+      k++;
+      const along = a * bw - 0.32 * v * h, up = v * h, out = th * thick * (1 - 0.7 * v);
+      const sgn = th < 0 ? -1 : 1;
+      add(K_PLATE, base[0] + Up[0] * up + A[0] * along + Np[0] * out, base[1] + Up[1] * up + A[1] * along + Np[1] * out,
+          base[2] + Up[2] * up + A[2] * along + Np[2] * out,
+          norm3(Np[0] * sgn * 0.8 + Up[0] * 0.4, Np[1] * sgn * 0.8 + Up[1] * 0.4, Np[2] * sgn * 0.8 + Up[2] * 0.4), u, 1, headWeight(u), 0);
+    }
+  };
+  for (let s = 0.03 * total; s < 0.87 * total;) {
+    const u = s / total, h = plateHeight(u), bw = 0.28 * h + 0.01;
+    plate(u, 0, h, bw);
+    if (u > 0.12) {
+      const u2 = Math.min(0.87, u + bw * 1.5 / total), h2 = plateHeight(u2) * 0.58;
+      plate(u2, -1, h2, 0.28 * h2 + 0.01);
+      plate(u2, 1, h2, 0.28 * h2 + 0.01);
+    }
+    s += bw * 3.0;
+  }
+
+  // rubble on the ground, denser near the camera; remembers the nearest bit of tail for its glow
+  const nGround = clamp(Math.round(14 / cell * 0.05), 1500, 9000);
+  for (let k = 0; k < nGround; k++) {
+    const x = (Math.random() * 2 - 1) * 2.4, z = 1.5 - 4.8 * Math.pow(Math.random(), 1.5);
+    let best = 9, bu = 0;
+    for (let i = 0; i < SP.length; i += 4) {
+      if (SP[i].u > 0.62) break;
+      const d = Math.hypot(SP[i].x - x, SP[i].z - z) - SP[i].hw;
+      if (d < best) { best = d; bu = SP[i].u; }
+    }
+    add(K_GROUND, x, Math.random() < 0.08 ? Math.random() * 0.03 : 0, z, [0, 1, 0], bu, Math.max(0, best), 0, C('..,,_-=:'[k % 8]));
+  }
+
+  // ruined blocks with punched-out windows
+  for (const [bx, bz, hw, hd, h, broken] of BUILDINGS) {
+    const zc = (h / 2 - YC) * SIN_P + bz * COS_P, pe = 3.1 / (3.1 - zc);
+    const sp = Math.sqrt(cell) * 1.05 / pe, seed = bx * 7 + bz * 3;
+    const faces = [[1, 0, hd], [-1, 0, hd], [0, 1, hw], [0, -1, hw]];
+    for (const [fx, fz, half] of faces) {
+      const nu = Math.ceil(2 * half / sp), nv = Math.ceil(h / sp);
+      for (let i = 0; i <= nu; i++) for (let j = 0; j <= nv; j++) {
+        const u = i / nu, v = j / nv;
+        if (broken && v > 0.78 + 0.18 * Math.sin(u * 17 + seed)) continue;
+        const wu = (u * 5) % 1, wv = (v * 9) % 1;
+        if (wu > 0.3 && wu < 0.72 && wv > 0.35 && wv < 0.78 && v < 0.95) continue;
+        if (Math.random() < 0.35) continue;
+        const along = (u * 2 - 1) * half;
+        const x = bx + (fx ? fx * hw : along), z = bz + (fz ? fz * hd : along);
+        add(K_BLDG, x, v * h, z, [fx, 0, fz], 0, 0, 0, C(':.|:#.'[(i * 3 + j) % 6]));
+      }
+    }
+    if (!broken) {
+      const nu = Math.ceil(2 * hw / sp), nv = Math.ceil(2 * hd / sp);
+      for (let i = 0; i <= nu; i++) for (let j = 0; j <= nv; j++) {
+        add(K_BLDG, bx + (i / nu * 2 - 1) * hw, h, bz + (j / nv * 2 - 1) * hd, [0, 1, 0], 0, 0, 0, C('#=-'[(i + j) % 3]));
+      }
+    }
+  }
+
+  const n = Q.kind.length;
+  P = {
+    n, kind: Uint8Array.from(Q.kind), ch: Uint16Array.from(Q.ch),
+    x: Float32Array.from(Q.x), y: Float32Array.from(Q.y), z: Float32Array.from(Q.z),
+    nx: Float32Array.from(Q.nx), ny: Float32Array.from(Q.ny), nz: Float32Array.from(Q.nz),
+    u: Float32Array.from(Q.u), top: Float32Array.from(Q.top), w: Float32Array.from(Q.w),
+    rnd: Float32Array.from({ length: n }, () => Math.random()),
+    ph: Float32Array.from({ length: n }, () => Math.random() * TAU),
+  };
+}
+
+// ── particles living in screen space: embers, snow, sparks ──
+function makeParticles() {
+  embers = Array.from({ length: 44 }, () => ember(Math.random() * H));
+  flakes = Array.from({ length: Math.round(W * H / 520) }, () => flake(Math.random() * H));
+  if (!noise) noise = Float32Array.from({ length: 64 * 64 }, () => Math.random());
+}
+function ember(y) {
+  return { x: Math.random() * W, y, v: 8 + Math.random() * 22, sway: 6 + Math.random() * 14, f: 0.5 + Math.random(), ph: Math.random() * TAU, near: Math.random() < 0.25 };
+}
+function flake(y) {
+  const d = Math.random();
+  return { x: Math.random() * W * 1.3, y, d, ph: Math.random() * TAU, on: Math.random(),
+           code: d > 0.78 ? C_STAR : d > 0.45 ? C_PLUS : C_DOT };
+}
+function burst(x, y, count, speed, fall) {
+  for (let i = 0; i < count; i++) {
+    const a = Math.random() * TAU, v = speed * (0.15 + Math.random() * 0.85), life = 0.6 + Math.random() * 1.2;
+    sparks.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v, life, max: life, g: fall, hot: Math.random() < 0.55 });
+  }
+}
+
+// ── lighting state for this moment ─────────────────────────
+function lighting(t) {
+  const c = clamp((t - T_CHARGE) / (T_REVEAL - T_CHARGE), 0, 1);
+  const charge = Math.pow(c, 1.15) + (c > 0 && c < 1 ? 0.008 * Math.sin(t * 11) : 0);
+  const reveal = smooth((t - T_REVEAL) / 0.7);
+  const flash = REDUCED ? 0 : (t > T_REVEAL ? Math.exp(-(t - T_REVEAL) * 3.2) : 0) + (t > T_FIRE ? 0.8 * Math.exp(-(t - T_FIRE) * 4) : 0);
+  const fireOn = clamp((t - T_FIRE) / 0.25, 0, 1) * (1 - smooth((t - T_FIRE_END) / 0.7));
+  const fire = fireOn * (0.86 + 0.14 * Math.sin(t * 37));
+  const boom = t > T_BOOM ? Math.exp(-(t - T_BOOM) * 0.9) : 0;
+  const snowI = smooth((t - T_SNOW) / 3.5);
+  return {
+    charge, reveal, flash, fire, boom, snowI,
+    snowCover: smooth((t - T_SNOW - 1.5) / 12) * 0.55,
+    amb: 0.01 + 0.015 * charge + 0.05 * reveal + 0.18 * flash + 0.14 * fire + 0.05 * snowI,
+    moon: 0.62 * reveal,
+    sky: 0.05 * charge * (0.6 + 0.4 * Math.sin(t * 3)) + 0.1 * reveal + 0.65 * fire + 0.5 * boom + 0.24 * snowI,
+    ember: 1 - snowI * 0.85,
+  };
+}
+
+// how hard the dorsal plates burn at spine position u
+function emission(u, t, L) {
+  if (t < T_REVEAL) {
+    const d = L.charge - u;
+    if (d < 0) return 0;
+    if (d < 0.05) return 0.78 + 0.22 * (1 - d / 0.05);     // the surge front
+    return 0.55 + 0.12 * Math.sin(t * 7 - u * 30);         // lit, rippling
+  }
+  if (t < T_FIRE) return 0.72 + 0.28 * smooth((t - T_REVEAL) / (T_FIRE - T_REVEAL)) * (0.9 + 0.1 * Math.sin(t * 40 + u * 20));
+  if (t < T_FIRE_END) return 0.96;
+  const k = smooth((t - T_FIRE_END) / 2.5);
+  return 0.96 * (1 - k) + k * (0.3 + 0.16 * (0.5 + 0.5 * Math.sin(t * 1.6 - u * 9)));
+}
+
+function headAngle(t) {
+  const up = smooth((t - T_REVEAL) / 1.0) * 0.42;
+  const lift = t > T_FIRE ? 0.08 * (1 - smooth((t - T_FIRE_END) / 1.5)) : 0;
+  const tremble = t > T_FIRE && t < T_FIRE_END && !REDUCED ? 0.015 * Math.sin(t * 31) : 0;
+  return up + lift + tremble - smooth((t - T_FIRE_END) / 2.5) * 0.3;
+}
+function mouthPos(ha) {
+  const s = SPINE[SPINE.length - 1], dy = s[1] - PIVOT[1], dz = s[2] - PIVOT[2], c = Math.cos(ha), n = Math.sin(ha);
+  return [s[0], PIVOT[1] + dy * c - dz * n, PIVOT[2] + dy * n + dz * c];
+}
+
+// ── sky: slow clouds that only show when something lights them ──
+function cloudNoise(x, y) {
+  let v = 0, amp = 0.62;
+  for (let o = 0; o < 2; o++) {
+    const xi = Math.floor(x), yi = Math.floor(y), fx = x - xi, fy = y - yi;
+    const a = noise[(yi & 63) * 64 + (xi & 63)], b = noise[(yi & 63) * 64 + ((xi + 1) & 63)];
+    const c = noise[((yi + 1) & 63) * 64 + (xi & 63)], d = noise[((yi + 1) & 63) * 64 + ((xi + 1) & 63)];
+    const sx = fx * fx * (3 - 2 * fx), sy = fy * fy * (3 - 2 * fy);
+    v += amp * (a + (b - a) * sx + (c - a) * sy + (a - b - c + d) * sx * sy);
+    x *= 2.1; y *= 2.1; amp *= 0.38;
+  }
+  return v;
+}
+
+function drawSky(t, L) {
+  if (L.sky < 0.02) return;
+  const top = Math.floor(rows * 0.62), grey = L.snowI > 0.5 && L.fire < 0.1;
+  const fam = grey ? F.ash : F.cloud, unit = 5 / W;
+  const boomR2 = (W * 0.45) ** 2;
+  for (let r = 0; r < top; r++) {
+    const fade = 0.35 + 0.65 * (1 - r / top), y = r * lineH;
+    for (let c = 0; c < cols; c++) {
+      const x = c * cellW;
+      let v = (cloudNoise(x * unit + t * 0.04, y * unit * 2.2 - t * 0.012) - 0.46) * 2.4;
+      if (v <= 0) continue;
+      v *= L.sky * fade;
+      if (L.boom > 0.02) v *= 1 + 2.5 * L.boom * Math.exp(-((x - boomAt[0]) ** 2 + ((y - boomAt[1]) * 2) ** 2) / boomR2);
+      if (v < 0.05 || hash(c, r, 3) > v * 1.6) continue;
+      put(c, r, CLOUD_CODES[Math.min(4, (v * 6) | 0)], tint(fam, 0.25 + 0.75 * Math.min(1, v)), -1e9);
+    }
+  }
+}
+
+function drawEmbers(t, dt, L) {
+  if (L.ember < 0.05) return;
+  for (const e of embers) {
+    e.y -= e.v * dt;
+    e.x += Math.sin(t * e.f + e.ph) * e.sway * dt;
+    if (e.y < -10) Object.assign(e, ember(H + 10));
+    const b = (0.35 + 0.65 * (0.5 + 0.5 * Math.sin(t * 5 * e.f + e.ph))) * L.ember;
+    if (b < 0.12) continue;
+    put(Math.floor(e.x / cellW), Math.floor(e.y / lineH), b > 0.75 ? C_STAR : b > 0.45 ? C_PLUS : C_DOT,
+        tint(F.ember, 0.3 + 0.7 * b), e.near ? 1e5 : -1e8);
+  }
+}
+
+function drawSnow(t, dt, L) {
+  if (L.snowI <= 0) return;
+  const fall = REDUCED ? 0.35 : 1;
+  for (const f of flakes) {
+    if (f.on > L.snowI) continue;                          // the storm thickens over a few seconds
+    f.y += (40 + f.d * 95) * dt * fall;
+    f.x -= (22 + f.d * 38) * dt * fall - Math.sin(t * 0.8 + f.ph) * 10 * dt;
+    if (f.y > H + 8 || f.x < -8) { Object.assign(f, flake(-8)); f.x = Math.random() * W * 1.3; }
+    const b = 0.4 + 0.6 * f.d * (0.8 + 0.2 * Math.sin(t * 3 + f.ph));
+    put(Math.floor(f.x / cellW), Math.floor(f.y / lineH), f.code, tint(F.snow, b), f.d > 0.7 ? 1e5 : -1e8);
+  }
+}
+
+// ── the kaiju, the street and the ruins ────────────────────
+function drawScene(t, L) {
+  const ha = headAngle(t), [, py0, pz0] = PIVOT;
+  const { n, kind, x: X, y: Y, z: Z, nx: NX, ny: NY, nz: NZ, u: U, top: TOP, w: WH, rnd, ph, ch } = P;
+  for (let i = 0; i < n; i++) {
+    const k = kind[i];
+    let x = X[i], y = Y[i], z = Z[i], nx = NX[i], ny = NY[i], nz = NZ[i];
+    const w = WH[i];
+    if (w > 0) {                                           // neck and head rear back
+      const a = ha * w, ca = Math.cos(a), sa = Math.sin(a), dy = y - py0, dz = z - pz0;
+      y = py0 + dy * ca - dz * sa; z = pz0 + dy * sa + dz * ca;
+      const ny2 = ny * ca - nz * sa; nz = ny * sa + nz * ca; ny = ny2;
+    }
+    const xr = x * cr + z * sr, zr = z * cr - x * sr, y0 = y - YC;
+    const yc = y0 * COS_P - zr * SIN_P, zc = y0 * SIN_P + zr * COS_P;
+    if (zc > DIST - 0.25) continue;
+    const persp = DIST / (DIST - zc);
+    const col = Math.floor((cx + xr * persp * scale) / cellW), row = Math.floor((cy - yc * persp * scale) / lineH);
+    if (col < 0 || col >= cols || row < 0 || row >= rows) continue;
+    const idx = row * cols + col;
+    if (zc + 0.02 <= zb[idx]) continue;
+
+    const nxr = nx * cr + nz * sr, nzr = nz * cr - nx * sr;
+    const nyc = ny * COS_P - nzr * SIN_P, nzc = ny * SIN_P + nzr * COS_P;
+    const lam = Math.max(0, nxr * LX + nyc * LY + nzc * LZ);
+    const r = rnd[i], u = U[i];
+    const edge = 1 - Math.abs(nzc);
+    const rim = L.fire * edge * edge * edge * 0.9 + L.flash * 0.35 * edge;
+    const backRim = L.reveal * 0.45 * edge * edge * edge * edge;
+    let code, color, z2 = zc;
+
+    if (k === K_PLATE) {
+      const e = emission(u, t, L) * (0.85 + 0.15 * Math.sin(t * 13 + ph[i] * 9));
+      if (e > 0.05) {
+        const v = e + (r - 0.5) * 0.25;
+        code = v > 0.92 ? C_AT : v > 0.78 ? C_HASH : v > 0.6 ? C_PCT : v > 0.42 ? C_STAR : C_PLUS;
+        color = v > 0.86 ? tint(F.core, 0.6 + 0.4 * e) : tint(F.atom, 0.35 + 0.65 * e);
+        if (ph[i] < 0.3 && Math.sin(t * 9 + ph[i] * 50) > 0.96) { code = C_STAR; color = tint(F.core, 1); }
+        z2 += 0.01;
+      } else {
+        const b = L.amb * 1.2 + L.moon * lam * 0.9 + rim + backRim;
+        if (b < 0.055) continue;
+        code = HIDE_CODES[clamp((b * 0.85 + (r - 0.5) * 0.3) * HIDE_LEN | 0, 0, HIDE_LEN - 1)];
+        color = tint(F.bone, 0.12 + 0.8 * b);
+      }
+    } else if (k === K_BODY) {
+      let g = u >= 0 && u <= L.charge + 0.02 ? emission(u, t, L) : 0;
+      if (u > 0.94 && t > T_REVEAL) g = Math.max(g, 0.6 * smooth((t - T_REVEAL) / 1.2) * (1 - smooth((t - T_FIRE_END) / 1.5)));
+      const G = g * TOP[i] * TOP[i] * TOP[i] * 0.22;
+      const b = L.amb + L.moon * lam * (0.85 + 0.3 * (r - 0.5)) + G + rim + backRim;
+      if (b < 0.055) continue;
+      if (ny > 0.3 && r < L.snowCover * ny) {              // snow settling on its back
+        code = ph[i] < 2 ? C_STAR : C_DOT; color = tint(F.snow, 0.35 + 0.6 * Math.min(1, b * 1.6));
+      } else {
+        code = HIDE_CODES[clamp((b * 0.85 + (r - 0.5) * 0.3) * HIDE_LEN | 0, 0, HIDE_LEN - 1)];
+        const blue = G + rim + L.fire * 0.2 + L.flash * 0.2;
+        color = blue > b * 0.55 ? tint(F.atom, 0.15 + 0.6 * b) : tint(F.hide, 0.06 + 0.62 * b);
+      }
+    } else if (k === K_GROUND) {
+      const e = u <= L.charge ? emission(u, t, L) : 0;
+      const G = e * 0.55 / (1 + (TOP[i] / 0.16) ** 2);
+      const b = L.amb * 0.6 + L.moon * 0.22 * (0.5 + r) + G + L.fire * 0.35;
+      if (b < 0.06) continue;
+      if (r < L.snowCover * 1.3) { code = ph[i] < 1.5 ? C_STAR : C_DOT; color = tint(F.snow, 0.3 + 0.5 * b); }
+      else { code = ch[i]; color = G > b * 0.4 || L.fire > 0.2 ? tint(F.atom, 0.2 + 0.8 * b) : tint(F.ash, 0.15 + 0.85 * b); }
+    } else {
+      const b = (L.amb * 0.8 + L.moon * lam * 0.5 + L.fire * (0.2 + 0.35 * Math.max(0, nyc)) + L.boom * 0.12) * 0.6;
+      if (b < 0.06) continue;
+      if (ny > 0.5 && r < L.snowCover * 1.4) { code = C_DOT; color = tint(F.snow, 0.3 + 0.5 * b); }
+      else { code = ch[i]; color = tint(F.stone, 0.15 + 0.85 * b); }
+    }
+    if (z2 <= zb[idx]) continue;
+    zb[idx] = z2; chr[idx] = code; clr[idx] = color;
+  }
+}
+
+// ── the atomic breath ──────────────────────────────────────
+function aimBeam(t) {
+  const ha = headAngle(t), pitch = ha + 0.16, m = mouthPos(ha), dy = Math.sin(pitch), dz = -Math.cos(pitch);
+  let s = 0.2;
+  for (; s < 9; s += 0.05) { const p = proj(m[0], m[1] + dy * s, m[2] + dz * s); if (p && p[1] < H * 0.08) break; }
+  beamLen = s;
+  const e = proj(m[0], m[1] + dy * s, m[2] + dz * s);
+  if (e) boomAt = [e[0], Math.max(H * 0.06, e[1])];
+}
+
+function drawBeam(t, L) {
+  if (L.fire <= 0.01) return;
+  const ha = headAngle(t), pitch = ha + 0.16, m = mouthPos(ha), dy = Math.sin(pitch), dz = -Math.cos(pitch);
+  const len = beamLen * clamp((t - T_FIRE) / 0.3, 0, 1);
+  const core = 0.034 * (0.8 + 0.2 * Math.sin(t * 43)) * Math.min(1, L.fire * 1.2);
+  const tick = Math.floor(t * 30);
+  for (let s = 0; s < len;) {
+    const p = proj(m[0], m[1] + dy * s, m[2] + dz * s);
+    if (!p) { s += 0.05; continue; }
+    const rpx = Math.max(cellW * 0.8, core * p[3] * scale), reach = rpx * 1.9;
+    const c0 = Math.floor((p[0] - reach) / cellW), c1 = Math.floor((p[0] + reach) / cellW);
+    const r0 = Math.floor((p[1] - reach) / lineH), r1 = Math.floor((p[1] + reach) / lineH);
+    for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+      const d = Math.hypot((c + 0.5) * cellW - p[0], (r + 0.5) * lineH - p[1]) / rpx;
+      if (d > 1.9) continue;
+      const h = hash(c, r, tick);
+      if (d < 0.45) put(c, r, h > 0.5 ? C_AT : C_HASH, tint(F.core, 1), p[2] + 0.05);
+      else if (d < 0.85) put(c, r, h > 0.6 ? C_PCT : h > 0.3 ? C_X : C_EQ, tint(F.core, 0.78), p[2] + 0.05);
+      else if (d < 1.25) put(c, r, h > 0.5 ? C_STAR : C_PLUS, tint(F.atom, 0.85), p[2] + 0.05);
+      else if (h > 0.55) put(c, r, h > 0.8 ? C_COLON : C_DOT, tint(F.atom, 0.55), p[2] + 0.05);
+    }
+    s += Math.max(0.004, Math.min(cellW, lineH) * 0.5 / (p[3] * scale));
+  }
+  for (let k = 0; k < 2; k++) for (let s = 0.05; s < len; s += 0.05) {   // two strands spiralling up the beam
+    const a = s * 16 - t * 22 + k * Math.PI, rr = core * 2.3;
+    const p = proj(m[0] + Math.cos(a) * rr, m[1] + dy * s - Math.sin(a) * rr * dz, m[2] + dz * s + Math.sin(a) * rr * dy);
+    if (p) put(Math.floor(p[0] / cellW), Math.floor(p[1] / lineH), C_STAR, tint(F.core, 0.95), p[2] + 0.06);
+  }
+}
+
+// ── where the breath hits the clouds: a ring of light, then snow ──
+function drawBoom(t) {
+  const age = t - T_BOOM;
+  if (age < 0 || age > 3.4) return;
+  if (!boomDone) { boomDone = true; if (!REDUCED) burst(boomAt[0], boomAt[1], 160, Math.max(W, H) * 0.45, 30); }
+  const [ex, ey] = boomAt, squash = 0.36;
+  const R = Math.max(W, H) * 0.6 * (1 - Math.exp(-age * 1.5)), thick = Math.max(lineH * 1.5, R * 0.06);
+  const fade = 1 - age / 3.4, tick = Math.floor(t * 20);
+  const r0 = Math.max(0, Math.floor((ey - (R + thick) * squash) / lineH)), r1 = Math.min(rows - 1, Math.ceil((ey + (R + thick) * squash) / lineH));
+  const c0 = Math.max(0, Math.floor((ex - R - thick) / cellW)), c1 = Math.min(cols - 1, Math.ceil((ex + R + thick) / cellW));
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+    const dx = (c + 0.5) * cellW - ex, dy = ((r + 0.5) * lineH - ey) / squash;
+    const d = Math.hypot(dx, dy), off = Math.abs(d - R) / thick, h = hash(c, r, tick);
+    if (off < 1 && h > off * 0.7) {
+      const v = (1 - off) * fade;
+      put(c, r, v > 0.6 ? C_STAR : v > 0.3 ? C_PLUS : C_DOT, tint(v > 0.55 ? F.core : F.atom, 0.35 + 0.65 * v), -1e7);
+    } else if (d < R * 0.55 && age < 0.9 && h > 0.6) {
+      put(c, r, h > 0.85 ? C_STAR : C_DOT, tint(F.core, (1 - age / 0.9) * 0.9), -1e7);
+    }
+  }
+}
+
+function drawSparks(dt) {
+  for (let i = sparks.length - 1; i >= 0; i--) {
+    const p = sparks[i];
+    p.life -= dt;
+    if (p.life <= 0) { sparks.splice(i, 1); continue; }
+    p.vx *= 1 - 1.4 * dt; p.vy = p.vy * (1 - 1.4 * dt) + p.g * dt;
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    const q = p.life / p.max;
+    put(Math.floor(p.x / cellW), Math.floor(p.y / lineH), q > 0.6 ? C_STAR : q > 0.3 ? C_PLUS : C_DOT,
+        tint(p.hot ? F.core : F.atom, 0.35 + 0.65 * q), 2e6);
+  }
+}
+
+// ── blit the grid ──────────────────────────────────────────
+function render(L) {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const cw = cellW * dpr, lh = lineH * dpr;
+  for (let r = 0, i = 0; r < rows; r++) {
+    const dy = Math.round(r * lh) - pad;
+    for (let c = 0; c < cols; c++, i++) {
+      const code = chr[i];
+      if (!code) continue;
+      const s = glyph(code, clr[i]);
+      ctx.drawImage(atlas, (s % SLOTS_X) * slotW, ((s / SLOTS_X) | 0) * slotH, slotW, slotH, Math.round(c * cw) - pad, dy, slotW, slotH);
+    }
+  }
+  if (!glow.hidden) {
+    gctx.clearRect(0, 0, glow.width, glow.height);
+    gctx.drawImage(canvas, 0, 0, glow.width, glow.height);
+    glow.style.opacity = (0.75 + 0.25 * Math.min(1, L.flash + L.fire)).toFixed(2);
+  }
+}
+
+// ── one frame ──────────────────────────────────────────────
+function frame(now) {
+  const real = (now - last) / 1000, dt = Math.min(0.05, real);
+  last = now;
+  t = (now - t0) / 1000;
+  const L = lighting(t);
+
+  if (!drag) rotUser *= Math.exp(-dt * 0.6);
+  rot = BASE_YAW + (REDUCED ? 0 : 0.06 * Math.sin(t * 0.2)) + rotUser;
+  cr = Math.cos(rot); sr = Math.sin(rot);
+  DIST = 3.3 - 0.35 * smooth((t - 1) / 8);
+  const shake = REDUCED ? 0 : L.fire * 5 + L.flash * 4;
+  cx = W / 2 + (Math.random() - 0.5) * shake;
+  cy = H * 0.53 + (Math.random() - 0.5) * shake;
+  if (t > T_FIRE - 0.1 && t < T_BOOM + 0.05) aimBeam(t);
+
+  // charge sparks crawl up the back with the light
+  if (!REDUCED && t > T_CHARGE && t < T_FIRE_END && Math.random() < dt * 26) {
+    const u = t < T_REVEAL ? Math.min(0.86, L.charge) : 0.15 + Math.random() * 0.7;
+    const q = spineAt(u), up = q.hh + plateHeight(u) * 0.6;
+    const p = proj(q.x + q.N[0] * up, q.y + q.N[1] * up, q.z + q.N[2] * up);
+    if (p) burst(p[0], p[1], 1 + (Math.random() * 2 | 0), 70, -60);
+  }
+
+  chr.fill(0); zb.fill(-Infinity);
+  drawSky(t, L);
+  drawEmbers(t, dt, L);
+  drawSnow(t, dt, L);
+  drawScene(t, L);
+  drawBeam(t, L);
+  drawBoom(t);
+  drawSparks(dt);
+  render(L);
+  hud(t, L, real);
+  requestAnimationFrame(frame);
+}
+
+// ── HUD ────────────────────────────────────────────────────
+const $t = document.getElementById('hud-t'), $phase = document.getElementById('hud-phase');
+const $bar = document.getElementById('hud-bar'), $charge = document.getElementById('hud-charge'), $hint = document.getElementById('hint');
+let hudClock = 0, fpsFrames = 0, fpsClock = 0, slowChecks = 0;
+
+function hud(t, L, real) {
+  fpsFrames++; fpsClock += real;
+  if (fpsClock >= 0.5) {
+    const fps = fpsFrames / fpsClock;
+    fpsFrames = 0; fpsClock = 0;
+    if (!glow.hidden && t > 2 && document.visibilityState === 'visible') {   // slow device: drop the blur layer
+      slowChecks = fps < 26 ? slowChecks + 1 : 0;
+      if (slowChecks >= 6) glow.hidden = true;
+    }
+  }
+  if ((hudClock += real) < 0.1) return;
+  hudClock = 0;
+  const pct = Math.round(clamp(L.charge, 0, 1) * 100);
+  $t.textContent = t.toFixed(1);
+  $phase.textContent = t < T_CHARGE ? 'dormant' : t < T_REVEAL ? 'charging' : t < T_FIRE ? 'full charge'
+    : t < T_FIRE_END ? 'atomic breath' : 'snowfall';
+  $bar.style.width = pct + '%';
+  $charge.textContent = pct;
+  if (!dragged && t > 10) $hint.classList.add('gone');
+}
+
+// ── controls ───────────────────────────────────────────────
+function replay() { t0 = performance.now(); boomDone = false; sparks.length = 0; }
+document.getElementById('btn-replay').addEventListener('click', replay);
+const btnFull = document.getElementById('btn-full');
+if (!document.fullscreenEnabled) btnFull.hidden = true;
+btnFull.addEventListener('click', () => {
+  try {
+    const p = document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+    if (p && p.catch) p.catch(() => {});
+  } catch (e) { /* not allowed here */ }
+});
+addEventListener('keydown', e => { if (e.key === 'r' || e.key === 'R') replay(); });
+
+canvas.addEventListener('pointerdown', e => {
+  drag = { x: e.clientX };
+  canvas.setPointerCapture(e.pointerId);
+  stage.classList.add('dragging');
+});
+canvas.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const da = (e.clientX - drag.x) * 0.006;
+  rotUser = clamp(rotUser + da, -1.2, 1.2);
+  drag.x = e.clientX;
+  if (da) { dragged = true; $hint.classList.add('gone'); }
+});
+const endDrag = () => { drag = null; stage.classList.remove('dragging'); };
+canvas.addEventListener('pointerup', endDrag);
+canvas.addEventListener('pointercancel', endDrag);
+
+let wake = null;
+async function keepAwake() {
+  try {
+    if ('wakeLock' in navigator && !wake && document.visibilityState === 'visible') {
+      wake = await navigator.wakeLock.request('screen');
+      wake.addEventListener('release', () => { wake = null; });
+    }
+  } catch (e) { /* refused: fine */ }
+}
+document.addEventListener('visibilitychange', keepAwake);
+keepAwake();
+
+// ── start ──────────────────────────────────────────────────
+buildSpine();
+let layoutQueued = false;
+new ResizeObserver(() => {
+  if (layoutQueued) return;
+  layoutQueued = true;
+  requestAnimationFrame(() => { layoutQueued = false; layout(); });
+}).observe(stage);
+layout();
+if (document.fonts) document.fonts.load('400 12px "JetBrains Mono"').then(layout, () => {});
+if (REDUCED) t0 -= (T_FIRE_END + 3) * 1000;
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
