@@ -1,0 +1,866 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="theme-color" content="#020406">
+<style>:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}[hidden]{display:none!important}</style>
+<title>ASCII Christmas Tree</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600&display=swap">
+<style>
+/* Layout: a full-bleed night stage for the tree; its own running source is docked below (beside it on wide screens). */
+:root {
+  --night: #020406;
+  --panel: #05080c;
+  --line-on: #0e1822;
+  --rule: #151e29;
+  --ink: #c3cedb;
+  --mute: #5a687c;
+  --faint: #283342;
+  --ember: #ff9a3c;
+  --kw: #ff7ca6;
+  --fn: #78b6ff;
+  --num: #ffae6b;
+  --str: #9bdc85;
+  --const: #d7a6ff;
+  --com: #46536a;
+  --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  color-scheme: dark;
+}
+html { box-sizing: border-box; height: 100%; overflow: hidden; background: var(--night); }
+*, *::before, *::after { box-sizing: inherit; }
+body { height: 100%; margin: 0; overflow: hidden; background: var(--night); color: var(--ink); font-family: var(--mono); -webkit-font-smoothing: antialiased; }
+
+.app { height: 100%; display: flex; flex-direction: column; }
+
+.stage { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
+.stage.dragging { cursor: grabbing; }
+.stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+#glow { filter: blur(5px) saturate(1.35); opacity: 0.85; pointer-events: none; }
+
+.hud { position: absolute; font-size: 11px; line-height: 1.5; color: var(--mute); pointer-events: none; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
+.hud b { font-weight: 400; color: var(--ink); }
+.hud-tr { top: 12px; right: max(16px, env(safe-area-inset-right, 0px)); color: var(--ember); }
+.hud-bl { bottom: 10px; left: max(16px, env(safe-area-inset-left, 0px)); display: grid; gap: 1px; }
+.hint { position: absolute; bottom: 10px; right: max(16px, env(safe-area-inset-right, 0px)); font-size: 11px; color: var(--mute); pointer-events: none; transition: opacity 0.8s; }
+.hint.gone { opacity: 0; }
+.dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--ember); margin-right: 5px; vertical-align: 1px; box-shadow: 0 0 6px var(--ember); }
+
+.controls { position: absolute; top: 8px; left: max(16px, env(safe-area-inset-left, 0px)); display: flex; flex-wrap: wrap; gap: 6px; max-width: calc(100% - 120px); }
+.controls button, .msg button {
+  font: inherit; font-size: 11px; letter-spacing: 0.02em; color: var(--ink);
+  background: var(--panel); border: 1px solid var(--rule); border-radius: 3px;
+  padding: 5px 9px; cursor: pointer; opacity: 0.8; transition: opacity 0.2s, border-color 0.2s;
+}
+.controls button:hover, .msg button:hover { opacity: 1; border-color: var(--faint); }
+.controls button[aria-pressed="false"] { color: var(--mute); }
+button:focus-visible, input:focus-visible { outline: 1px solid var(--ember); outline-offset: 2px; }
+.controls .k { color: var(--ember); margin-right: 4px; }
+
+.msg { position: absolute; top: 42px; left: max(16px, env(safe-area-inset-left, 0px)); right: max(16px, env(safe-area-inset-right, 0px)); max-width: 360px; display: grid; gap: 6px; padding: 10px; background: var(--panel); border: 1px solid var(--rule); border-radius: 4px; }
+.msg label { font-size: 11px; color: var(--mute); letter-spacing: 0.04em; text-transform: uppercase; }
+.msg-row { display: flex; gap: 6px; }
+.msg input { flex: 1; min-width: 0; font: inherit; font-size: 16px; color: var(--ink); background: var(--night); border: 1px solid var(--faint); border-radius: 3px; padding: 6px 8px; }
+
+.code { flex: none; height: clamp(140px, 30%, 300px); display: flex; flex-direction: column; background: var(--panel); border-top: 1px solid var(--rule); }
+.app.code-off .code { display: none; }
+.code header {
+  display: flex; justify-content: space-between; gap: 12px; align-items: center;
+  padding-block: 7px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  font-size: 11px; color: var(--mute); border-bottom: 1px solid var(--rule); white-space: nowrap;
+}
+.code header .file { color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
+.code header .run { color: var(--ember); font-variant-numeric: tabular-nums; }
+.code-view { position: relative; flex: 1; min-height: 0; overflow: hidden;
+  -webkit-mask-image: linear-gradient(transparent, #000 14%, #000 82%, transparent);
+  mask-image: linear-gradient(transparent, #000 14%, #000 82%, transparent); }
+#code-pre { margin: 0; padding-block: 8px; font-size: 11.5px; line-height: 1.7; transition: transform 0.45s cubic-bezier(0.2, 0.7, 0.2, 1); will-change: transform; }
+.l { white-space: pre; color: var(--ink); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.l .no { display: inline-block; width: 3.4em; color: var(--faint); user-select: none; -webkit-user-select: none; }
+.l.on { background: var(--line-on); }
+.l.on .no { color: var(--ember); }
+.l .k { color: var(--kw); } .l .f { color: var(--fn); } .l .n { color: var(--num); }
+.l .s { color: var(--str); } .l .u { color: var(--const); } .l .c { color: var(--com); font-style: italic; }
+
+@media (min-width: 960px) and (min-aspect-ratio: 5/4) {
+  .app { flex-direction: row; }
+  .code { height: auto; width: clamp(340px, 34%, 540px); border-top: 0; border-left: 1px solid var(--rule); }
+}
+@media (max-width: 560px) {
+  .controls .lbl { display: none; }
+  .controls .k { margin-right: 0; }
+  .controls button { padding: 5px 8px; min-width: 30px; }
+}
+@media (max-height: 540px) {
+  .code, #btn-code { display: none !important; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #code-pre, .hint { transition: none; }
+}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <div class="stage" id="stage">
+    <canvas id="glow" aria-hidden="true"></canvas>
+    <canvas id="tree" role="img" aria-label="An ASCII Christmas tree that builds itself from the ground up, then spins with twinkling lights, a star on top and gifts underneath."></canvas>
+
+    <div class="controls">
+      <button id="btn-replay" type="button" aria-label="Replay"><span class="k">↻</span><span class="lbl">replay</span></button>
+      <button id="btn-msg" type="button" aria-label="Edit message"><span class="k">✎</span><span class="lbl">message</span></button>
+      <button id="btn-code" type="button" aria-pressed="true" aria-label="Show code"><span class="k">{}</span><span class="lbl">code</span></button>
+      <button id="btn-full" type="button" aria-label="Fullscreen"><span class="k">⤢</span><span class="lbl">fullscreen</span></button>
+    </div>
+
+    <form class="msg" id="msg-form" hidden>
+      <label for="msg-input">Message under the tree</label>
+      <div class="msg-row">
+        <input id="msg-input" type="text" maxlength="40" autocomplete="off" spellcheck="false" enterkeyhint="done">
+        <button type="submit">set</button>
+      </div>
+    </form>
+
+    <div class="hud hud-tr"><span class="dot"></span>t <span id="hud-t">0.0</span>s</div>
+    <div class="hud hud-bl">
+      <div>rotation <b id="hud-rot">0.00</b>°</div>
+      <div>lights · <b id="hud-lights">0</b></div>
+      <div>chars · <b id="hud-chars">0</b></div>
+    </div>
+    <div class="hint" id="hint">drag to spin</div>
+  </div>
+
+  <section class="code" id="code" aria-label="Source code of this animation">
+    <header>
+      <span class="file">christmas_tree.js</span>
+      <span class="run"><span class="dot"></span>running · <span id="fps">60</span> fps</span>
+    </header>
+    <div class="code-view" id="code-view"><div id="code-pre"></div></div>
+  </section>
+</div>
+
+<script id="tree-src">
+'use strict';
+
+// ── timeline (seconds) ─────────────────────────────────────
+const T_TREE = 0.4, T_TREE_END = 5.0, T_GIFTS = 4.5, T_GARLAND = 4.6;
+const T_STAR = 6.0, T_MSG = 7.0;
+
+// ── scene, in world units (tree height = 1) ────────────────
+const TREE_R = 0.42, TIERS = 6, GROUND_Y = -0.18, STAR_Y = 1.06;
+const LIGHTS = 170, BAUBLES = 46;
+const PITCH = 0.21, DIST = 4.2, YC = 0.43;
+const COS_P = Math.cos(PITCH), SIN_P = Math.sin(PITCH);
+const [LX, LY, LZ] = norm3(-0.45, 0.62, 0.64);
+const TAU = Math.PI * 2, GOLDEN = Math.PI * (3 - Math.sqrt(5));
+const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
+const MONO = '"JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace';
+const DEFAULT_MSG = 'MERRY CHRISTMAS';
+
+const C = s => s.charCodeAt(0);
+const RAMP = '.:-~^=+*xo%&#@W';
+const RAMP_CODES = Array.from(RAMP, C), RAMP_LEN = RAMP.length;
+const RAY_CODES = Array.from('-/|\\', C);
+const C_STAR = C('*'), C_PLUS = C('+'), C_DOT = C('.'), C_O = C('o');
+const C_TILDE = C('~'), C_AT = C('@'), C_HASH = C('#'), C_UNDER = C('_');
+
+const K_LEAF = 0, K_BAUBLE = 1, K_LIGHT = 2, K_GARLAND = 3;   // these grow with the tree
+const K_TRUNK = 4, K_GROUND = 5, K_GIFT = 6, K_RIBBON = 7;
+
+const GIFTS = [
+  { a: 0.075, b: 0.060, c: 0.070, ang: 0.35, dist: 0.50, yaw: 0.3, body: 'red', rib: 'gold' },
+  { a: 0.055, b: 0.080, c: 0.055, ang: 1.45, dist: 0.52, yaw: -0.4, body: 'blue', rib: 'white' },
+  { a: 0.085, b: 0.045, c: 0.060, ang: 2.55, dist: 0.49, yaw: 0.9, body: 'gold', rib: 'red' },
+  { a: 0.060, b: 0.065, c: 0.070, ang: 3.75, dist: 0.51, yaw: 0.2, body: 'green', rib: 'red' },
+  { a: 0.070, b: 0.050, c: 0.065, ang: 4.90, dist: 0.50, yaw: -0.7, body: 'pink', rib: 'white' },
+  { a: 0.045, b: 0.040, c: 0.045, ang: 5.75, dist: 0.61, yaw: 0.5, body: 'red', rib: 'white' },
+];
+const BAUBLE_FAMS = ['red', 'red', 'blue', 'gold', 'pink', 'orange', 'blue', 'red'];
+const LIGHT_FAMS = ['gold', 'gold', 'white', 'red', 'blue', 'cyan', 'pink', 'orange', 'gold', 'white'];
+const MSG_FAMS = ['red', 'gold', 'green'];
+
+// ── palette: every family ramps dark → saturated → pale ────
+const FAMILIES = {
+  pine:   ['#03160a', '#1f8f3a', '#b4ff96'],
+  moss:   ['#0f1a03', '#6da61e', '#ecff86'],
+  red:    ['#2a0306', '#e8283c', '#ffb4aa'],
+  blue:   ['#040b2c', '#2f6dff', '#bcd6ff'],
+  gold:   ['#2a1a00', '#f2b11e', '#fff5b8'],
+  pink:   ['#2a0320', '#e443a6', '#ffc4ec'],
+  orange: ['#2a1000', '#ff7b1c', '#ffd4a4'],
+  cyan:   ['#02201f', '#1bc9d1', '#c4fffb'],
+  green:  ['#031a08', '#25b84e', '#b8ffc6'],
+  white:  ['#0f131b', '#98a5b8', '#ffffff'],
+  brown:  ['#190a03', '#9c4a1f', '#eea474'],
+  snow:   ['#080c13', '#55627a', '#e6eeff'],
+};
+const LEVELS = 16, F = {}, COLORS = [];
+for (const [name, stops] of Object.entries(FAMILIES)) {
+  F[name] = COLORS.length / LEVELS;
+  const [a, b, c] = stops.map(hexRgb);
+  for (let l = 0; l < LEVELS; l++) {
+    const s = l / (LEVELS - 1);
+    const [p, q, u] = s < 0.6 ? [a, b, s / 0.6] : [b, c, (s - 0.6) / 0.4];
+    COLORS.push('rgb(' + p.map((v, j) => Math.round(v + (q[j] - v) * u)).join(',') + ')');
+  }
+}
+
+// ── page state ─────────────────────────────────────────────
+const app = document.getElementById('app');
+const stage = document.getElementById('stage');
+const canvas = document.getElementById('tree'), ctx = canvas.getContext('2d');
+const glow = document.getElementById('glow'), gctx = glow.getContext('2d');
+const atlas = document.createElement('canvas'), actx = atlas.getContext('2d');
+
+let W = 1, H = 1, dpr = 1, cols = 1, rows = 1, cellW = 6, lineH = 10, fontPx = 8;
+let scale = 1, cx = 0, cy = 0;
+let chr = new Uint16Array(1), clr = new Uint8Array(1), zb = new Float32Array(1);
+let P = null, flakes = [], sparks = [];
+let t0 = performance.now(), last = t0, t = 0, rot = 0.6, spin = 0, drag = null;
+let message = loadMessage(), msgT0 = T_MSG, sparked = false, dragged = false;
+
+// ── small helpers ──────────────────────────────────────────
+function norm3(x, y, z) { const l = Math.hypot(x, y, z) || 1; return [x / l, y / l, z / l]; }
+function clamp(v, a, b) { return v < a ? a : v > b ? b : v; }
+function smooth(p) { p = clamp(p, 0, 1); return p * p * (3 - 2 * p); }
+function easeInOut(p) { p = clamp(p, 0, 1); return p < 0.5 ? 4 * p * p * p : 1 - Math.pow(2 - 2 * p, 3) / 2; }
+function hexRgb(h) { const n = parseInt(h.slice(1), 16); return [n >> 16, (n >> 8) & 255, n & 255]; }
+function tint(f, b) { return f * LEVELS + clamp(Math.round(b * (LEVELS - 1)), 0, LEVELS - 1); }
+function hash(a, b, c) { const s = Math.sin(a * 127.1 + b * 311.7 + c * 74.7) * 43758.5453; return s - Math.floor(s); }
+function randDir() {
+  const u = Math.random() * 2 - 1, a = Math.random() * TAU, s = Math.sqrt(1 - u * u);
+  return [s * Math.cos(a), u, s * Math.sin(a)];
+}
+function bounceOut(p) {
+  const n = 7.5625, d = 2.75;
+  if (p < 1 / d) return n * p * p;
+  if (p < 2 / d) return n * (p -= 1.5 / d) * p + 0.75;
+  if (p < 2.5 / d) return n * (p -= 2.25 / d) * p + 0.9375;
+  return n * (p -= 2.625 / d) * p + 0.984375;
+}
+
+// the cone, in six flared tiers
+function treeRadius(h, jitter) {
+  const tier = (h * TIERS) % 1;
+  return TREE_R * (1 - h) * (0.8 + 0.27 * Math.pow(1 - tier, 1.6)) * (1 + 0.07 * (jitter - 0.5));
+}
+
+// 5-point star distance field (negative inside)
+function sdStar5(px, py, r, rf) {
+  const k1x = 0.809016994375, k1y = -0.587785252292;
+  px = Math.abs(px);
+  let d = 2 * Math.max(k1x * px + k1y * py, 0); px -= d * k1x; py -= d * k1y;
+  d = 2 * Math.max(-k1x * px + k1y * py, 0); px += d * k1x; py -= d * k1y;
+  px = Math.abs(px); py -= r;
+  const bax = -rf * k1y, bay = rf * k1x - 1;
+  const h = clamp((px * bax + py * bay) / (bax * bax + bay * bay), 0, r);
+  return Math.hypot(px - bax * h, py - bay * h) * Math.sign(py * bax - px * bay);
+}
+
+function put(col, row, code, color, z) {
+  if (col < 0 || row < 0 || col >= cols || row >= rows) return;
+  const i = row * cols + col;
+  if (z <= zb[i]) return;
+  zb[i] = z; chr[i] = code; clr[i] = color;
+}
+
+// ── glyph atlas: each (char, colour) is drawn once, then blitted ──
+const SLOTS_X = 64, SLOTS_Y = 64;
+let slotW = 1, slotH = 1, pad = 1, slotNext = 0, asciiSlots = new Int16Array(0);
+const wideSlots = new Map();
+
+function resetAtlas() {
+  pad = Math.ceil(dpr);
+  slotW = Math.ceil(cellW * dpr) + pad * 2;
+  slotH = Math.ceil(lineH * dpr) + pad * 2;
+  atlas.width = slotW * SLOTS_X; atlas.height = slotH * SLOTS_Y;
+  actx.font = fontPx * dpr + 'px ' + MONO;
+  actx.textAlign = 'center'; actx.textBaseline = 'middle';
+  asciiSlots = new Int16Array(COLORS.length * 128).fill(-1);
+  wideSlots.clear(); slotNext = 0;
+}
+
+function glyph(code, color) {
+  let s = code < 128 ? asciiSlots[color * 128 + code] : (wideSlots.get(color * 65536 + code) ?? -1);
+  if (s >= 0) return s;
+  if (slotNext >= SLOTS_X * SLOTS_Y) {
+    actx.clearRect(0, 0, atlas.width, atlas.height);
+    asciiSlots.fill(-1); wideSlots.clear(); slotNext = 0;
+  }
+  s = slotNext++;
+  actx.fillStyle = COLORS[color];
+  actx.fillText(String.fromCharCode(code), (s % SLOTS_X) * slotW + slotW / 2, ((s / SLOTS_X) | 0) * slotH + slotH / 2);
+  if (code < 128) asciiSlots[color * 128 + code] = s; else wideSlots.set(color * 65536 + code, s);
+  return s;
+}
+
+// ── layout: grid size follows the screen ───────────────────
+function layout() {
+  const box = stage.getBoundingClientRect();
+  W = Math.max(1, box.width); H = Math.max(1, box.height);
+  dpr = Math.min(window.devicePixelRatio || 1, 3);
+  canvas.width = Math.round(W * dpr); canvas.height = Math.round(H * dpr);
+  glow.width = Math.max(1, Math.round(W / 2)); glow.height = Math.max(1, Math.round(H / 2));
+  lineH = clamp(H / 84, 5.5, 15);
+  fontPx = lineH / 1.22;
+  ctx.font = fontPx + 'px ' + MONO;
+  cellW = ctx.measureText('M').width || fontPx * 0.6;
+  cols = Math.ceil(W / cellW); rows = Math.ceil(H / lineH);
+  chr = new Uint16Array(cols * rows); clr = new Uint8Array(cols * rows); zb = new Float32Array(cols * rows);
+  scale = Math.min((H * 0.9 - lineH * 5) / 1.62, W * 0.76);
+  cx = W / 2; cy = H * 0.06 + 0.76 * scale;
+  resetAtlas(); buildScene(); makeSnow();
+}
+
+// ── scene: every visible thing is a 3D point ───────────────
+function buildScene() {
+  const sx = cellW / scale, sy = lineH / scale, cell = sx * sy;
+  const L = { kind: [], x: [], y: [], z: [], nx: [], ny: [], nz: [], fam: [], key: [], ch: [] };
+  const add = (kind, x, y, z, n, fam, key, ch) => {
+    L.kind.push(kind); L.x.push(x); L.y.push(y); L.z.push(z);
+    L.nx.push(n[0]); L.ny.push(n[1]); L.nz.push(n[2]);
+    L.fam.push(fam); L.key.push(key); L.ch.push(ch);
+  };
+
+  // needles: a golden-angle spiral up the cone, so points arrive in height order
+  const nLeaf = clamp(Math.round(1.6 / cell * 3), 3000, 40000);
+  for (let i = 0; i < nLeaf; i++) {
+    const h = (1 - Math.sqrt(1 - (i + Math.random()) / nLeaf)) * 0.985;
+    const a = i * GOLDEN, ca = Math.cos(a), sa = Math.sin(a);
+    const shell = Math.random() < 0.8 ? 1 - Math.random() * 0.06 : 0.45 + Math.random() * 0.5;
+    const r = treeRadius(h, Math.random()) * shell;
+    add(K_LEAF, r * ca, h, r * sa, norm3(ca, 0.45, sa), Math.random() < 0.2 ? F.moss : F.pine, h, 0);
+  }
+
+  // baubles: little spheres hung on the surface
+  const perBauble = clamp(Math.round(4 * Math.PI * 0.021 * 0.021 / cell * 1.3), 6, 40);
+  for (let b = 0; b < BAUBLES; b++) {
+    const h = 0.05 + (1 - Math.sqrt(1 - Math.random())) * 0.82;
+    const a = Math.random() * TAU, rr = treeRadius(h, 0.6);
+    const bx = rr * Math.cos(a), bz = rr * Math.sin(a), rad = 0.016 + Math.random() * 0.008;
+    const fam = F[BAUBLE_FAMS[b % BAUBLE_FAMS.length]];
+    for (let k = 0; k < perBauble; k++) {
+      const d = randDir();
+      add(K_BAUBLE, bx + d[0] * rad, h + d[1] * rad, bz + d[2] * rad, d, fam, h, C('@%&#o'[k % 5]));
+    }
+  }
+
+  // fairy lights, just proud of the needles
+  for (let k = 0; k < LIGHTS; k++) {
+    const h = 0.03 + (1 - Math.sqrt(1 - Math.random())) * 0.9;
+    const a = Math.random() * TAU, ca = Math.cos(a), sa = Math.sin(a);
+    const rr = treeRadius(h, 0.8) * 1.04;
+    add(K_LIGHT, rr * ca, h, rr * sa, norm3(ca, 0.4, sa), F[LIGHT_FAMS[k % LIGHT_FAMS.length]], h, 0);
+  }
+
+  // tinsel garland spiralling up, weaving in and out of the tiers
+  const nG = clamp(Math.round(4.2 / sx * 1.6), 300, 3000);
+  for (let k = 0; k < nG; k++) {
+    const u = k / nG, h = 0.04 + u * 0.84, a = u * 3.4 * TAU + 0.9;
+    const rr = TREE_R * (1 - h) + 0.008, ca = Math.cos(a), sa = Math.sin(a);
+    add(K_GARLAND, rr * ca, h, rr * sa, norm3(ca, 0.4, sa), F.gold, u, 0);
+  }
+
+  // trunk
+  const nT = clamp(Math.round(TAU * 0.06 * 0.24 / cell * 2.5), 120, 2400);
+  for (let k = 0; k < nT; k++) {
+    const a = Math.random() * TAU, y = GROUND_Y + Math.random() * 0.24;
+    add(K_TRUNK, 0.06 * Math.cos(a), y, 0.06 * Math.sin(a), [Math.cos(a), 0, Math.sin(a)], F.brown, y, C('|#%H'[k % 4]));
+  }
+
+  // gifts: five faces each, a ribbon cross and a bow
+  const sp = Math.sqrt(cell) * 0.8;
+  const FACES = [
+    [[1, 0, 0], [0, 0, 1], [0, 1, 0], 'c', 'b', 'a'],
+    [[-1, 0, 0], [0, 0, 1], [0, 1, 0], 'c', 'b', 'a'],
+    [[0, 0, 1], [1, 0, 0], [0, 1, 0], 'a', 'b', 'c'],
+    [[0, 0, -1], [1, 0, 0], [0, 1, 0], 'a', 'b', 'c'],
+    [[0, 1, 0], [1, 0, 0], [0, 0, 1], 'a', 'c', 'b'],
+  ];
+  GIFTS.forEach((g, gi) => {
+    const gx = g.dist * Math.cos(g.ang), gz = g.dist * Math.sin(g.ang), gy = GROUND_Y + g.b;
+    const cyw = Math.cos(g.yaw), syw = Math.sin(g.yaw);
+    for (const [n, U, V, uk, vk, ok] of FACES) {
+      const uh = g[uk], vh = g[vk], off = g[ok], top = n[1] === 1;
+      const nu = Math.max(2, Math.ceil(2 * uh / sp)), nv = Math.max(2, Math.ceil(2 * vh / sp));
+      const nwx = n[0] * cyw - n[2] * syw, nwz = n[0] * syw + n[2] * cyw;
+      for (let i = 0; i <= nu; i++) for (let j = 0; j <= nv; j++) {
+        const u = -uh + 2 * uh * i / nu, v = -vh + 2 * vh * j / nv;
+        const lx = n[0] * off + U[0] * u + V[0] * v;
+        const ly = n[1] * off + U[1] * u + V[1] * v;
+        const lz = n[2] * off + U[2] * u + V[2] * v;
+        const ribbon = top ? Math.abs(u) < uh * 0.16 || Math.abs(v) < vh * 0.16 : Math.abs(u) < uh * 0.16;
+        add(ribbon ? K_RIBBON : K_GIFT, gx + lx * cyw - lz * syw, gy + ly, gz + lx * syw + lz * cyw,
+            [nwx, n[1], nwz], F[ribbon ? g.rib : g.body], gi, ribbon ? C_HASH : C('%#@&='[(i + j * 3) % 5]));
+      }
+    }
+    for (let k = 0; k < 16; k++) {
+      const d = randDir(); d[1] = Math.abs(d[1]);
+      add(K_RIBBON, gx + d[0] * 0.022, gy + g.b + 0.012 + d[1] * 0.02, gz + d[2] * 0.022, d, F[g.rib], gi, C('&'));
+    }
+  });
+
+  // a thin disc of snow on the ground
+  const nGround = Math.round(Math.PI * 0.72 * 0.72 / cell * 0.1);
+  for (let k = 0; k < nGround; k++) {
+    const rr = 0.08 + Math.sqrt(Math.random()) * 0.64, a = Math.random() * TAU;
+    add(K_GROUND, rr * Math.cos(a), GROUND_Y, rr * Math.sin(a), [0, 1, 0], F.snow, 0, C('..._-,'[k % 6]));
+  }
+
+  const n = L.kind.length;
+  P = {
+    n,
+    kind: Uint8Array.from(L.kind), fam: Uint8Array.from(L.fam), ch: Uint16Array.from(L.ch),
+    x: Float32Array.from(L.x), y: Float32Array.from(L.y), z: Float32Array.from(L.z),
+    nx: Float32Array.from(L.nx), ny: Float32Array.from(L.ny), nz: Float32Array.from(L.nz),
+    key: Float32Array.from(L.key),
+    rnd: Float32Array.from({ length: n }, () => Math.random()),
+    ph: Float32Array.from({ length: n }, () => Math.random() * TAU),
+  };
+}
+
+// ── snow ───────────────────────────────────────────────────
+function makeSnow() {
+  flakes = Array.from({ length: Math.round(cols * rows / 36) }, () => flake(Math.random() * rows));
+}
+function flake(y) {
+  const d = Math.random();
+  return { x: Math.random() * cols, y, d, v: 1 + d * 4.5, ph: Math.random() * TAU,
+           code: d > 0.8 ? C_STAR : d > 0.45 ? C_PLUS : C_DOT };
+}
+
+function drawSnow(t, dt) {
+  const fall = REDUCED ? 0.25 : 1;
+  for (const f of flakes) {
+    f.y += f.v * dt * fall;
+    f.x += Math.sin(t * 0.5 + f.ph) * (0.3 + f.d) * dt * fall;
+    if (f.y >= rows) Object.assign(f, flake(-1));
+    if (f.x < 0) f.x += cols; else if (f.x >= cols) f.x -= cols;
+    const twinkle = 0.5 + 0.5 * Math.sin(t * (0.8 + f.d * 2.5) + f.ph);
+    put(Math.floor(f.x), Math.floor(f.y), f.code, tint(F.snow, 0.22 + 0.45 * f.d + 0.25 * twinkle), -1e8);
+  }
+}
+
+// ── the tree: rotate, tilt, project, z-test, shade ─────────
+function drawTree(t) {
+  const grow = easeInOut((t - T_TREE) / (T_TREE_END - T_TREE)) * 1.09;
+  const garland = clamp((t - T_GARLAND) / 1.6, 0, 1) * 1.09;
+  const base = (t - 0.1) / 0.5;
+  const cr = Math.cos(rot), sr = Math.sin(rot);
+  const { n, kind, x: PX, y: PY, z: PZ, nx: NX, ny: NY, nz: NZ, fam, key, ch, rnd, ph } = P;
+
+  for (let i = 0; i < n; i++) {
+    const k = kind[i];
+    let x = PX[i], y = PY[i], z = PZ[i], c = cr, s = sr, fresh = 1;
+
+    if (k <= K_GARLAND) {
+      const lim = k === K_GARLAND ? garland : grow;
+      if (key[i] > lim) continue;
+      fresh = (lim - key[i]) / 0.08;
+      if (fresh < 1) {                      // still flying in on a wider spiral
+        const f = (1 - fresh) * (1 - fresh);
+        x *= 1 + 1.1 * f; z *= 1 + 1.1 * f;
+        c = Math.cos(rot - 1.8 * f); s = Math.sin(rot - 1.8 * f);
+      }
+    } else if (k >= K_GIFT) {
+      const p = (t - T_GIFTS - key[i] * 0.17) / 0.75;
+      if (p <= 0) continue;
+      if (p < 1) y += (1 - bounceOut(p)) * 0.9;   // dropped in, with a bounce
+    } else if (rnd[i] > base) continue;
+
+    const xr = x * c + z * s, zr = z * c - x * s;
+    const y0 = y - YC;
+    const yc = y0 * COS_P - zr * SIN_P, zc = y0 * SIN_P + zr * COS_P;
+    const persp = DIST / (DIST - zc);
+    const col = Math.floor((cx + xr * persp * scale) / cellW);
+    const row = Math.floor((cy - yc * persp * scale) / lineH);
+    if (col < 0 || col >= cols || row < 0 || row >= rows) continue;
+    const idx = row * cols + col;
+    if (zc + 0.03 <= zb[idx]) continue;
+
+    const nxr = NX[i] * c + NZ[i] * s, nzr = NZ[i] * c - NX[i] * s;
+    const nyc = NY[i] * COS_P - nzr * SIN_P, nzc = NY[i] * SIN_P + nzr * COS_P;
+    const lam = Math.max(0, nxr * LX + nyc * LY + nzc * LZ);
+    const r = rnd[i];
+    let z2 = zc, code, color;
+
+    if (fresh < 1) {
+      code = RAMP_CODES[(Math.random() * RAMP_LEN) | 0];
+      color = tint(F.white, 0.55 + 0.45 * (1 - fresh));
+      z2 += 0.02;
+    } else if (k === K_LEAF) {
+      let b = 0.14 + 0.8 * lam + (r - 0.5) * 0.24;
+      if (nzc < 0) b *= 0.5;
+      if (ph[i] < 0.42 && nzc > 0.15 && Math.sin(t * (0.8 + r * 3) + ph[i] * 40) > 0.986) {
+        code = C_STAR; color = tint(F.white, 1); z2 += 0.03;   // bling
+      } else {
+        code = RAMP_CODES[clamp((b * 0.7 + r * 0.45 + 0.02) * RAMP_LEN | 0, 0, RAMP_LEN - 1)];
+        color = tint(fam[i], 0.3 + 0.75 * b);
+      }
+    } else if (k === K_BAUBLE) {
+      if (lam > 0.9 && nzc > 0.45) { code = C_STAR; color = tint(F.white, 1); }
+      else { code = ch[i]; color = tint(fam[i], 0.25 + 0.75 * lam + 0.08 * Math.sin(t * 2 + ph[i])); }
+      z2 += 0.01;
+    } else if (k === K_LIGHT) {
+      let v = 0.5 + 0.5 * Math.sin(t * (1.1 + r * 2.6) + ph[i]);
+      v = v * v * v;
+      if (v > 0.5) { code = C_STAR; color = tint(fam[i], 0.85 + 0.15 * v); z2 += 0.03; }
+      else if (v > 0.15) { code = C_PLUS; color = tint(fam[i], 0.7); z2 += 0.02; }
+      else { code = C_O; color = tint(fam[i], 0.38); }
+    } else if (k === K_GARLAND) {
+      const chase = 0.5 + 0.5 * Math.sin(key[i] * 70 - t * 6);
+      code = chase > 0.86 ? C_STAR : C_TILDE;
+      color = tint(F.gold, (0.3 + 0.7 * lam) * (0.55 + 0.45 * chase) + 0.15);
+      z2 += 0.01;
+    } else if (k === K_TRUNK) {
+      code = ch[i]; color = tint(F.brown, 0.2 + 0.75 * lam);
+    } else if (k === K_GROUND) {
+      if (ph[i] < 0.3 && Math.sin(t * 2 + ph[i] * 30) > 0.97) { code = C_STAR; color = tint(F.white, 0.9); }
+      else { code = ch[i]; color = tint(F.snow, 0.12 + 0.3 * r + 0.25 * clamp(zc, 0, 1)); }
+    } else if (k === K_GIFT) {
+      code = ch[i]; color = tint(fam[i], 0.18 + 0.82 * lam + (r - 0.5) * 0.12);
+    } else {
+      code = ch[i]; color = tint(fam[i], 0.4 + 0.6 * lam);
+    }
+
+    if (z2 <= zb[idx]) continue;
+    zb[idx] = z2; chr[idx] = code; clr[idx] = color;
+  }
+}
+
+// ── star on top, with rays and a burst of sparks ───────────
+function drawStar(t, dt) {
+  if (t < T_STAR) return;
+  const age = t - T_STAR;
+  const on = smooth(age / 0.35);
+  const flash = REDUCED ? 0 : Math.pow(clamp(1 - age / 1.2, 0, 1), 2);
+  const y0 = STAR_Y - YC, persp = DIST / (DIST - y0 * SIN_P);
+  const sx = cx, sy = cy - y0 * COS_P * persp * scale;
+  const R = scale * 0.1 * on * (1 + 0.7 * flash + 0.05 * Math.sin(t * 3));
+
+  if (!sparked) { sparked = true; if (!REDUCED) burst(sx, sy, 90, 260); }
+  else if (!REDUCED && Math.random() < dt * 4) burst(sx + (Math.random() - 0.5) * R * 3, sy + (Math.random() - 0.5) * R * 2, 1, 40);
+
+  const reach = R * (1.7 + 3.6 * flash) + R * 0.25 * Math.sin(t * 2);
+  const step = Math.min(cellW, lineH) * 0.9, march = Math.floor(t * 9);
+  for (let k = 0; k < 8; k++) {
+    const a = k * Math.PI / 4 + t * 0.12, ca = Math.cos(a), sa = Math.sin(a);
+    const code = RAY_CODES[Math.round((((a % Math.PI) + Math.PI) % Math.PI) / (Math.PI / 4)) % 4];
+    const len = reach * (k % 2 ? 0.62 : 1);
+    for (let d = R * 1.25, m = 0; d < len; d += step, m++) {
+      if ((m + march) % 3 === 0) continue;
+      const fade = 1 - d / len;
+      put(Math.floor((sx + ca * d) / cellW), Math.floor((sy - sa * d) / lineH), code,
+          tint(F.gold, 0.2 + 0.6 * fade * (0.55 + 0.45 * flash)), -1e7);
+    }
+  }
+
+  const wobble = 0.86 + 0.14 * Math.cos(t * 1.3), tick = Math.floor(t * 10);
+  const c0 = Math.floor((sx - R * 1.3) / cellW), c1 = Math.ceil((sx + R * 1.3) / cellW);
+  const r0 = Math.floor((sy - R * 1.3) / lineH), r1 = Math.ceil((sy + R * 1.3) / lineH);
+  for (let r = r0; r <= r1; r++) for (let c = c0; c <= c1; c++) {
+    const px = ((c + 0.5) * cellW - sx) / wobble, py = sy - (r + 0.5) * lineH;
+    const d = sdStar5(px, py, R, 0.5) / Math.max(R, 1e-3);
+    if (d < 0) {
+      const q = -d;
+      put(c, r, q > 0.3 ? C_AT : q > 0.13 ? C_HASH : C_STAR,
+          q > 0.3 ? tint(F.white, 0.9 + 0.1 * flash) : tint(F.gold, 0.75 + 0.25 * flash + 0.1 * Math.sin(t * 5 + c)), 1e6);
+    } else if (d < 0.25 && hash(c, r, tick) > 0.55) {
+      put(c, r, hash(r, c, tick) > 0.5 ? C_STAR : C_DOT, tint(F.gold, 0.5), 1e6 - 1);
+    }
+  }
+}
+
+function burst(x, y, count, speed) {
+  for (let i = 0; i < count; i++) {
+    const a = Math.random() * TAU, v = speed * (0.2 + Math.random() * 0.8), life = 0.7 + Math.random() * 1.1;
+    sparks.push({ x, y, vx: Math.cos(a) * v, vy: Math.sin(a) * v - speed * 0.15, life, max: life,
+                  fam: Math.random() < 0.6 ? F.gold : F.white });
+  }
+}
+
+function drawSparks(dt) {
+  for (let i = sparks.length - 1; i >= 0; i--) {
+    const p = sparks[i];
+    p.life -= dt;
+    if (p.life <= 0) { sparks.splice(i, 1); continue; }
+    p.vx *= 1 - 1.2 * dt; p.vy = p.vy * (1 - 1.2 * dt) + 120 * dt;
+    p.x += p.vx * dt; p.y += p.vy * dt;
+    const q = p.life / p.max;
+    put(Math.floor(p.x / cellW), Math.floor(p.y / lineH), q > 0.6 ? C_STAR : q > 0.3 ? C_PLUS : C_DOT,
+        tint(p.fam, 0.35 + 0.65 * q), 2e6);
+  }
+}
+
+// ── the message, typed out under the tree ──────────────────
+function messageLines() {
+  const txt = message.toLocaleUpperCase(), avail = cols - 8;
+  const spaced = Array.from(txt).join(' ');
+  if (spaced.length <= avail) return [spaced];
+  if (txt.length <= avail) return [txt];
+  let cut = txt.lastIndexOf(' ', txt.length / 2);
+  if (cut < 1) cut = txt.indexOf(' ', txt.length / 2);
+  if (cut < 1) cut = Math.floor(txt.length / 2);
+  return [txt.slice(0, cut).trim(), txt.slice(cut).trim()].map(l => l.slice(0, avail));
+}
+
+function messageRow() {
+  const y0 = GROUND_Y - YC, zr = 0.72;
+  const yc = y0 * COS_P - zr * SIN_P, zc = y0 * SIN_P + zr * COS_P;
+  return Math.floor((cy - yc * (DIST / (DIST - zc)) * scale) / lineH) + 2;
+}
+
+function drawMessage(t) {
+  if (t < msgT0) return;
+  const lines = messageLines();
+  const row0 = Math.min(messageRow(), rows - 2 - (lines.length - 1) * 2);
+  let shown = Math.floor((t - msgT0) * 12), cursor = shown < lines.join('').length;
+  lines.forEach((line, li) => {
+    const chars = Array.from(line), row = row0 + li * 2;
+    const x0 = Math.floor((cols - chars.length) / 2);
+    const visible = clamp(shown, 0, chars.length);
+    if (visible > 0 || cursor) {
+      for (let r = row - 1; r <= row + 1; r++) for (let c = x0 - 3; c < x0 + visible + 3; c++) {
+        if (r >= 0 && c >= 0 && r < rows && c < cols) { chr[r * cols + c] = 0; zb[r * cols + c] = 1e9; }
+      }
+    }
+    for (let j = 0; j < visible; j++) {
+      if (chars[j] === ' ') continue;
+      const fam = F[MSG_FAMS[(Math.floor(j / 2) + Math.floor(t * 1.5)) % 3]];
+      put(x0 + j, row, chars[j].codePointAt(0), tint(fam, 0.86 + 0.14 * Math.sin(t * 4 + j * 0.7)), 2e9);
+    }
+    if (cursor && shown >= 0 && shown < chars.length && (t * 3) % 1 < 0.6) {
+      put(x0 + visible, row, C_UNDER, tint(F.white, 0.8), 2e9);
+      cursor = false;
+    }
+    shown -= chars.length;
+  });
+}
+
+// ── blit the grid ──────────────────────────────────────────
+function render() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+  const cw = cellW * dpr, lh = lineH * dpr;
+  let count = 0;
+  for (let r = 0, i = 0; r < rows; r++) {
+    const dy = Math.round(r * lh) - pad;
+    for (let c = 0; c < cols; c++, i++) {
+      const code = chr[i];
+      if (!code) continue;
+      const s = glyph(code, clr[i]);
+      ctx.drawImage(atlas, (s % SLOTS_X) * slotW, ((s / SLOTS_X) | 0) * slotH, slotW, slotH,
+                    Math.round(c * cw) - pad, dy, slotW, slotH);
+      count++;
+    }
+  }
+  if (!glow.hidden) {
+    gctx.clearRect(0, 0, glow.width, glow.height);
+    gctx.drawImage(canvas, 0, 0, glow.width, glow.height);
+  }
+  return count;
+}
+
+// ── one frame ──────────────────────────────────────────────
+function frame(now) {
+  const real = (now - last) / 1000, dt = Math.min(0.05, real);
+  last = now;
+  t = (now - t0) / 1000;
+  const speed = REDUCED ? 0.15 : 0.5 + 1.7 * (1 - smooth(t / 7));
+  if (drag) spin *= Math.exp(-dt * 6);
+  else { rot += (speed + spin) * dt; spin *= Math.exp(-dt * 1.5); }
+
+  chr.fill(0); zb.fill(-Infinity);
+  drawSnow(t, dt);
+  drawTree(t);
+  drawStar(t, dt);
+  drawSparks(dt);
+  drawMessage(t);
+  const drawn = render();
+
+  hud(t, drawn, real);
+  updateCode(t, dt);
+  requestAnimationFrame(frame);
+}
+
+// ── HUD + live source panel ────────────────────────────────
+const $t = document.getElementById('hud-t'), $rot = document.getElementById('hud-rot');
+const $lights = document.getElementById('hud-lights'), $chars = document.getElementById('hud-chars');
+const $fps = document.getElementById('fps'), $hint = document.getElementById('hint');
+let hudClock = 0, fpsFrames = 0, fpsClock = 0, slowChecks = 0;
+
+function hud(t, drawn, real) {
+  fpsFrames++; fpsClock += real;
+  if (fpsClock >= 0.5) {
+    const fps = fpsFrames / fpsClock;
+    $fps.textContent = Math.round(fps);
+    fpsFrames = 0; fpsClock = 0;
+    // a slow device drops the blur layer, the most expensive extra
+    if (!glow.hidden && t > 2 && document.visibilityState === 'visible') {
+      slowChecks = fps < 28 ? slowChecks + 1 : 0;
+      if (slowChecks >= 6) glow.hidden = true;
+    }
+  }
+  hudClock += real;
+  if (hudClock < 0.1) return;
+  hudClock = 0;
+  $t.textContent = t.toFixed(1);
+  $rot.textContent = (((rot * 180 / Math.PI) % 360 + 360) % 360).toFixed(2);
+  $lights.textContent = Math.min(LIGHTS, Math.round(LIGHTS * clamp(easeInOut((t - T_TREE) / (T_TREE_END - T_TREE)) * 1.09, 0, 1)));
+  $chars.textContent = drawn.toLocaleString('en-US');
+  if (!dragged && t > 12) $hint.classList.add('gone');
+}
+
+const SRC = document.getElementById('tree-src').textContent.replace(/^\n+/, '').replace(/\s+$/, '').split('\n');
+const KEYWORDS = new Set(['const', 'let', 'var', 'function', 'return', 'if', 'else', 'for', 'while', 'of', 'in', 'new', 'break', 'continue', 'true', 'false', 'null', 'typeof']);
+const codePre = document.getElementById('code-pre'), codeView = document.getElementById('code-view');
+
+function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function highlight(line) {
+  const re = /(\/\/.*$)|('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")|(\b\d+(?:\.\d+)?(?:e-?\d+)?\b)|([A-Za-z_$][\w$]*)/g;
+  let out = '', at = 0, m;
+  while ((m = re.exec(line))) {
+    out += esc(line.slice(at, m.index));
+    const [, com, str, num, word] = m;
+    if (com) out += '<span class="c">' + esc(com) + '</span>';
+    else if (str) out += '<span class="s">' + esc(str) + '</span>';
+    else if (num) out += '<span class="n">' + num + '</span>';
+    else if (KEYWORDS.has(word)) out += '<span class="k">' + word + '</span>';
+    else if (/^\s*\(/.test(line.slice(re.lastIndex))) out += '<span class="f">' + word + '</span>';
+    else if (/^[A-Z][A-Z0-9_]+$/.test(word)) out += '<span class="u">' + word + '</span>';
+    else out += word;
+    at = re.lastIndex;
+  }
+  return out + esc(line.slice(at));
+}
+codePre.innerHTML = SRC.map((l, i) => '<div class="l"><span class="no">' + (i + 1) + '</span>' + (highlight(l) || ' ') + '</div>').join('');
+const lineEls = codePre.children;
+
+function rangeOf(sig) {
+  const a = SRC.findIndex(l => l.startsWith(sig));
+  if (a < 0) return [0, Math.min(20, SRC.length - 1)];
+  let b = a;
+  while (b < SRC.length - 1 && SRC[b] !== '}') b++;
+  return [a, b];
+}
+const SECTIONS = {
+  snow: rangeOf('function drawSnow'), tree: rangeOf('function drawTree'), star: rangeOf('function drawStar'),
+  msg: rangeOf('function drawMessage'), frame: rangeOf('function frame'), sparks: rangeOf('function drawSparks'),
+};
+const IDLE = ['frame', 'tree', 'star', 'sparks', 'snow', 'msg'];
+let codeLine = -1, codeSec = '', codeTick = 0;
+
+function setLine(i) {
+  if (lineEls[codeLine]) lineEls[codeLine].classList.remove('on');
+  codeLine = i;
+  lineEls[i].classList.add('on');
+  codePre.style.transform = 'translateY(' + -Math.max(0, lineEls[i].offsetTop - codeView.clientHeight * 0.3) + 'px)';
+}
+
+function updateCode(t, dt) {
+  if (app.classList.contains('code-off') || !codeView.clientHeight) return;
+  const sec = t < T_TREE ? 'snow' : t < T_STAR ? 'tree' : t < T_MSG ? 'star' : t < T_MSG + 2.5 ? 'msg'
+    : IDLE[Math.floor((t - T_MSG - 2.5) / 4.5) % IDLE.length];
+  const [a, b] = SECTIONS[sec];
+  if (sec !== codeSec) { codeSec = sec; codeTick = 0; setLine(a); return; }
+  if ((codeTick += dt) < 0.13) return;
+  codeTick = 0;
+  let next = codeLine + 1;
+  while (next <= b && !SRC[next].trim()) next++;
+  setLine(next > b ? a : next);
+}
+
+// ── controls ───────────────────────────────────────────────
+function loadMessage() { try { return localStorage.getItem('ascii-tree-msg') || DEFAULT_MSG; } catch (e) { return DEFAULT_MSG; } }
+function saveMessage(m) { try { localStorage.setItem('ascii-tree-msg', m); } catch (e) { /* private mode */ } }
+
+function replay() {
+  t0 = performance.now(); sparked = false; sparks.length = 0; msgT0 = T_MSG; codeSec = '';
+}
+function toggleCode() {
+  const off = app.classList.toggle('code-off');
+  document.getElementById('btn-code').setAttribute('aria-pressed', String(!off));
+}
+
+const form = document.getElementById('msg-form'), input = document.getElementById('msg-input');
+document.getElementById('btn-replay').addEventListener('click', replay);
+document.getElementById('btn-code').addEventListener('click', toggleCode);
+document.getElementById('btn-msg').addEventListener('click', () => {
+  form.hidden = !form.hidden;
+  if (!form.hidden) { input.value = message; input.focus(); input.select(); }
+});
+form.addEventListener('submit', e => {
+  e.preventDefault();
+  message = (input.value.normalize('NFC').trim() || DEFAULT_MSG).slice(0, 40);
+  saveMessage(message);
+  msgT0 = Math.max(t, T_MSG);
+  form.hidden = true;
+});
+
+const btnFull = document.getElementById('btn-full');
+if (!document.fullscreenEnabled) btnFull.hidden = true;
+btnFull.addEventListener('click', () => {
+  try {
+    const p = document.fullscreenElement ? document.exitFullscreen() : document.documentElement.requestFullscreen();
+    if (p && p.catch) p.catch(() => {});
+  } catch (e) { /* not allowed here */ }
+});
+
+addEventListener('keydown', e => {
+  if (e.target.closest && e.target.closest('input')) { if (e.key === 'Escape') form.hidden = true; return; }
+  if (e.key === 'r' || e.key === 'R') replay();
+  else if (e.key === 'c' || e.key === 'C') toggleCode();
+  else if (e.key === 'ArrowLeft') spin -= 2.5;
+  else if (e.key === 'ArrowRight') spin += 2.5;
+  else if (e.key === 'Escape') form.hidden = true;
+});
+
+// drag to spin, with a little inertia
+canvas.addEventListener('pointerdown', e => {
+  drag = { x: e.clientX, t: e.timeStamp };
+  canvas.setPointerCapture(e.pointerId);
+  stage.classList.add('dragging');
+  form.hidden = true;
+});
+canvas.addEventListener('pointermove', e => {
+  if (!drag) return;
+  const da = (e.clientX - drag.x) * 0.011, secs = Math.max(8, e.timeStamp - drag.t) / 1000;
+  rot += da;
+  spin = clamp(0.6 * spin + 0.4 * (da / secs), -12, 12);
+  drag.x = e.clientX; drag.t = e.timeStamp;
+  if (Math.abs(da) > 0) { dragged = true; $hint.classList.add('gone'); }
+});
+const endDrag = () => { drag = null; stage.classList.remove('dragging'); };
+canvas.addEventListener('pointerup', endDrag);
+canvas.addEventListener('pointercancel', endDrag);
+
+// keep the phone screen awake while the tree is showing
+let wake = null;
+async function keepAwake() {
+  try {
+    if ('wakeLock' in navigator && !wake && document.visibilityState === 'visible') {
+      wake = await navigator.wakeLock.request('screen');
+      wake.addEventListener('release', () => { wake = null; });
+    }
+  } catch (e) { /* refused: fine */ }
+}
+document.addEventListener('visibilitychange', keepAwake);
+keepAwake();
+
+// ── start ──────────────────────────────────────────────────
+let layoutQueued = false;
+new ResizeObserver(() => {
+  if (layoutQueued) return;
+  layoutQueued = true;
+  requestAnimationFrame(() => { layoutQueued = false; layout(); });
+}).observe(stage);
+layout();
+if (document.fonts) document.fonts.load('400 12px "JetBrains Mono"').then(layout, () => {});
+if (REDUCED) t0 -= (T_MSG + 3) * 1000;
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
