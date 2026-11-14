@@ -21,3 +21,4 @@ Một con kaiju 3D vẽ hoàn toàn bằng ký tự ASCII (cùng chất liệu v
 
 - Kéo ngang để xoay góc nhìn (thả ra sẽ tự trở về góc sau lưng)
 - `replay` hoặc phím `R`: chạy lại từ đầu
+- `code` hoặc phím `C`: ẩn/hiện khung code đang chạy (khung tô sáng đúng đoạn code của cảnh đang diễn ra)

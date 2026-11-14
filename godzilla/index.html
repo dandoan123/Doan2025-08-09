@@ -22,6 +22,14 @@
   --mute: #4f6178;
   --atom: #46a6ff;
   --atom-hot: #bfe9ff;
+  --line-on: #0b1624;
+  --faint: #23324a;
+  --kw: #ff7ca6;
+  --fn: #78b6ff;
+  --num: #ffae6b;
+  --str: #9bdc85;
+  --const: #d7a6ff;
+  --com: #445570;
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   color-scheme: dark;
 }
@@ -29,7 +37,8 @@ html { box-sizing: border-box; height: 100%; overflow: hidden; background: var(-
 *, *::before, *::after { box-sizing: inherit; }
 body { height: 100%; margin: 0; overflow: hidden; background: var(--night); color: var(--ink); font-family: var(--mono); -webkit-font-smoothing: antialiased; }
 
-.stage { position: relative; height: 100%; overflow: hidden; touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
+.app { height: 100%; display: flex; flex-direction: column; }
+.stage { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
 .stage.dragging { cursor: grabbing; }
 .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
 #glow { filter: blur(6px) saturate(1.5) brightness(1.4); opacity: 0.85; pointer-events: none; }
@@ -54,20 +63,51 @@ button:focus-visible { outline: 1px solid var(--atom); outline-offset: 2px; }
 .hint { position: absolute; bottom: 12px; left: 50%; transform: translateX(-50%); font-size: 11px; color: var(--mute); pointer-events: none; white-space: nowrap; transition: opacity 0.8s; }
 .hint.gone { opacity: 0; }
 
+.controls button[aria-pressed="false"] { color: var(--mute); }
+
+.code { flex: none; height: clamp(130px, 28%, 300px); display: flex; flex-direction: column; background: var(--panel); border-top: 1px solid var(--rule); }
+.app.code-off .code { display: none; }
+.code header {
+  display: flex; justify-content: space-between; gap: 12px; align-items: center;
+  padding-block: 7px; padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  font-size: 11px; color: var(--mute); border-bottom: 1px solid var(--rule); white-space: nowrap;
+}
+.code header .file { color: var(--ink); overflow: hidden; text-overflow: ellipsis; }
+.code header .run { color: var(--atom); font-variant-numeric: tabular-nums; }
+.code-view { position: relative; flex: 1; min-height: 0; overflow: hidden;
+  -webkit-mask-image: linear-gradient(transparent, #000 14%, #000 82%, transparent);
+  mask-image: linear-gradient(transparent, #000 14%, #000 82%, transparent); }
+#code-pre { margin: 0; padding-block: 8px; font-size: 11.5px; line-height: 1.7; transition: transform 0.45s cubic-bezier(0.2, 0.7, 0.2, 1); will-change: transform; }
+.l { white-space: pre; color: var(--ink); padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px)); }
+.l .no { display: inline-block; width: 3.4em; color: var(--faint); user-select: none; -webkit-user-select: none; }
+.l.on { background: var(--line-on); }
+.l.on .no { color: var(--atom); }
+.l .k { color: var(--kw); } .l .f { color: var(--fn); } .l .n { color: var(--num); }
+.l .s { color: var(--str); } .l .u { color: var(--const); } .l .c { color: var(--com); font-style: italic; }
+
+@media (min-width: 960px) and (min-aspect-ratio: 5/4) {
+  .app { flex-direction: row; }
+  .code { height: auto; width: clamp(340px, 34%, 540px); border-top: 0; border-left: 1px solid var(--rule); }
+}
 @media (max-width: 560px) {
   .controls .lbl { display: none; }
   .controls .k { margin-right: 0; }
 }
-@media (prefers-reduced-motion: reduce) { .hint { transition: none; } }
+@media (max-height: 540px) {
+  .code, #btn-code { display: none !important; }
+}
+@media (prefers-reduced-motion: reduce) { .hint, #code-pre { transition: none; } }
 </style>
 </head>
 <body>
+<div class="app" id="app">
 <div class="stage" id="stage">
   <canvas id="glow" aria-hidden="true"></canvas>
   <canvas id="scene" role="img" aria-label="A kaiju made of ASCII characters stands with its back to you in a dark ruined city. Blue light charges up its dorsal plates from tail to head, it fires an atomic breath into the sky, and the blast turns into falling snow."></canvas>
 
   <div class="controls">
     <button id="btn-replay" type="button" aria-label="Replay"><span class="k">↻</span><span class="lbl">replay</span></button>
+    <button id="btn-code" type="button" aria-pressed="true" aria-label="Show code"><span class="k">{}</span><span class="lbl">code</span></button>
     <button id="btn-full" type="button" aria-label="Fullscreen"><span class="k">⤢</span><span class="lbl">fullscreen</span></button>
   </div>
 
@@ -79,7 +119,16 @@ button:focus-visible { outline: 1px solid var(--atom); outline-offset: 2px; }
   <div class="hint" id="hint">drag to look around</div>
 </div>
 
-<script>
+<section class="code" id="code" aria-label="Source code of this animation">
+  <header>
+    <span class="file">kaiju.js</span>
+    <span class="run"><span class="dot"></span>running · <span id="fps">60</span> fps</span>
+  </header>
+  <div class="code-view" id="code-view"><div id="code-pre"></div></div>
+</section>
+</div>
+
+<script id="kaiju-src">
 'use strict';
 
 // ── timeline (seconds) ─────────────────────────────────────
@@ -737,6 +786,7 @@ function frame(now) {
   drawSparks(dt);
   render(L);
   hud(t, L, real);
+  updateCode(t, dt);
   requestAnimationFrame(frame);
 }
 
@@ -749,6 +799,7 @@ function hud(t, L, real) {
   fpsFrames++; fpsClock += real;
   if (fpsClock >= 0.5) {
     const fps = fpsFrames / fpsClock;
+    $fps.textContent = Math.round(fps);
     fpsFrames = 0; fpsClock = 0;
     if (!glow.hidden && t > 2 && document.visibilityState === 'visible') {   // slow device: drop the blur layer
       slowChecks = fps < 26 ? slowChecks + 1 : 0;
@@ -766,9 +817,78 @@ function hud(t, L, real) {
   if (!dragged && t > 10) $hint.classList.add('gone');
 }
 
+// ── live source panel: this very script, following the scene ──
+const app = document.getElementById('app'), $fps = document.getElementById('fps');
+const SRC = document.getElementById('kaiju-src').textContent.replace(/^\n+/, '').replace(/\s+$/, '').split('\n');
+const KEYWORDS = new Set(['const', 'let', 'var', 'function', 'return', 'if', 'else', 'for', 'while', 'of', 'in', 'new', 'break', 'continue', 'true', 'false', 'null', 'typeof', 'async', 'await', 'try', 'catch']);
+const codePre = document.getElementById('code-pre'), codeView = document.getElementById('code-view');
+
+function esc(s) { return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'); }
+function highlight(line) {
+  const re = /(\/\/.*$)|('(?:[^'\\]|\\.)*'|"(?:[^"\\]|\\.)*")|(\b\d+(?:\.\d+)?(?:e-?\d+)?\b)|([A-Za-z_$][\w$]*)/g;
+  let out = '', at = 0, m;
+  while ((m = re.exec(line))) {
+    out += esc(line.slice(at, m.index));
+    const [, com, str, num, word] = m;
+    if (com) out += '<span class="c">' + esc(com) + '</span>';
+    else if (str) out += '<span class="s">' + esc(str) + '</span>';
+    else if (num) out += '<span class="n">' + num + '</span>';
+    else if (KEYWORDS.has(word)) out += '<span class="k">' + word + '</span>';
+    else if (/^\s*\(/.test(line.slice(re.lastIndex))) out += '<span class="f">' + word + '</span>';
+    else if (/^[A-Z][A-Z0-9_]+$/.test(word)) out += '<span class="u">' + word + '</span>';
+    else out += word;
+    at = re.lastIndex;
+  }
+  return out + esc(line.slice(at));
+}
+codePre.innerHTML = SRC.map((l, i) => '<div class="l"><span class="no">' + (i + 1) + '</span>' + (highlight(l) || ' ') + '</div>').join('');
+const lineEls = codePre.children;
+
+function rangeOf(sig) {
+  const a = SRC.findIndex(l => l.startsWith(sig));
+  if (a < 0) return [0, Math.min(20, SRC.length - 1)];
+  let b = a;
+  while (b < SRC.length - 1 && SRC[b] !== '}') b++;
+  return [a, b];
+}
+const SECTIONS = {
+  embers: rangeOf('function drawEmbers'), emission: rangeOf('function emission'), scene: rangeOf('function drawScene'),
+  head: rangeOf('function headAngle'), beam: rangeOf('function drawBeam'), boom: rangeOf('function drawBoom'),
+  snow: rangeOf('function drawSnow'), sky: rangeOf('function drawSky'), sparks: rangeOf('function drawSparks'),
+  frame: rangeOf('function frame'), lighting: rangeOf('function lighting'),
+};
+const IDLE = ['frame', 'scene', 'lighting', 'sky', 'snow', 'sparks'];
+let codeLine = -1, codeSec = '', codeTick = 0;
+
+function setLine(i) {
+  if (lineEls[codeLine]) lineEls[codeLine].classList.remove('on');
+  codeLine = i;
+  lineEls[i].classList.add('on');
+  codePre.style.transform = 'translateY(' + -Math.max(0, lineEls[i].offsetTop - codeView.clientHeight * 0.3) + 'px)';
+}
+
+function updateCode(t, dt) {
+  if (app.classList.contains('code-off') || !codeView.clientHeight) return;
+  const sec = t < T_CHARGE ? 'embers' : t < T_CHARGE + 2.5 ? 'emission' : t < T_REVEAL ? 'scene' : t < T_FIRE ? 'head'
+    : t < T_BOOM + 0.6 ? 'beam' : t < T_SNOW + 1 ? 'boom' : t < T_FIRE_END + 3 ? 'snow'
+    : IDLE[Math.floor((t - T_FIRE_END - 3) / 4.5) % IDLE.length];
+  const [a, b] = SECTIONS[sec];
+  if (sec !== codeSec) { codeSec = sec; codeTick = 0; setLine(a); return; }
+  if ((codeTick += dt) < 0.13) return;
+  codeTick = 0;
+  let next = codeLine + 1;
+  while (next <= b && !SRC[next].trim()) next++;
+  setLine(next > b ? a : next);
+}
+
 // ── controls ───────────────────────────────────────────────
-function replay() { t0 = performance.now(); boomDone = false; sparks.length = 0; }
+function replay() { t0 = performance.now(); boomDone = false; sparks.length = 0; codeSec = ''; }
+function toggleCode() {
+  const off = app.classList.toggle('code-off');
+  document.getElementById('btn-code').setAttribute('aria-pressed', String(!off));
+}
 document.getElementById('btn-replay').addEventListener('click', replay);
+document.getElementById('btn-code').addEventListener('click', toggleCode);
 const btnFull = document.getElementById('btn-full');
 if (!document.fullscreenEnabled) btnFull.hidden = true;
 btnFull.addEventListener('click', () => {
@@ -777,7 +897,10 @@ btnFull.addEventListener('click', () => {
     if (p && p.catch) p.catch(() => {});
   } catch (e) { /* not allowed here */ }
 });
-addEventListener('keydown', e => { if (e.key === 'r' || e.key === 'R') replay(); });
+addEventListener('keydown', e => {
+  if (e.key === 'r' || e.key === 'R') replay();
+  else if (e.key === 'c' || e.key === 'C') toggleCode();
+});
 
 canvas.addEventListener('pointerdown', e => {
   drag = { x: e.clientX };
