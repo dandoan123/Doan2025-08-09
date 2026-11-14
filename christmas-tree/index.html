@@ -41,12 +41,32 @@ body { height: 100%; margin: 0; overflow: hidden; background: var(--night); colo
 .stage { position: relative; flex: 1; min-height: 0; overflow: hidden; touch-action: none; cursor: grab; user-select: none; -webkit-user-select: none; }
 .stage.dragging { cursor: grabbing; }
 .stage canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-#glow { filter: blur(5px) saturate(1.35); opacity: 0.85; pointer-events: none; }
+#glow { filter: blur(5px) saturate(1.4) brightness(1.35); opacity: 1; pointer-events: none; }
 
 .hud { position: absolute; font-size: 11px; line-height: 1.5; color: var(--mute); pointer-events: none; letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
 .hud b { font-weight: 400; color: var(--ink); }
-.hud-tr { top: 12px; right: max(16px, env(safe-area-inset-right, 0px)); color: var(--ember); }
-.hud-bl { bottom: 10px; left: max(16px, env(safe-area-inset-left, 0px)); display: grid; gap: 1px; }
+.hud-tr { top: 12px; right: max(16px, env(safe-area-inset-right, 0px)); display: grid; justify-items: end; gap: 1px; }
+.hud-tr .clock { color: var(--ember); margin-bottom: 2px; }
+
+/* the greeting: real letters over the grid, each its own colour, dancing on its own beat */
+.banner { position: absolute; left: 0; right: 0; top: 0; display: grid; justify-items: center; row-gap: 0.2em;
+  padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
+  font-family: var(--mono); font-weight: 600; line-height: 1.1; pointer-events: none; }
+.banner .row { display: flex; align-items: flex-end; white-space: nowrap; }
+.banner .sp { display: inline-block; width: 0.45em; }
+.banner .ch { display: inline-block; width: 0.66em; text-align: center; transform-origin: 50% 85%; }
+.banner .ch b { display: inline-block; font-weight: 600; color: var(--c);
+  text-shadow: 0 0 0.1em var(--c), 0 0 0.45em var(--g), 0 0 1em var(--g);
+  opacity: 0; transform: translate(1.2em, -0.3em) scale(0.2) rotate(30deg);
+  transition: opacity 0.35s ease-out, transform 0.6s cubic-bezier(0.3, 1.7, 0.5, 1); }
+.banner .ch.in b { opacity: 1; transform: none; }
+.banner .ch.in { animation: dance 1.2s ease-in-out infinite; animation-delay: calc(var(--i) * -0.14s); }
+@keyframes dance {
+  0%, 100% { transform: translateY(0) rotate(-8deg) scale(1.04, 0.94); }
+  25%      { transform: translateY(-0.3em) rotate(0deg) scale(0.96, 1.06); }
+  50%      { transform: translateY(0) rotate(8deg) scale(1.04, 0.94); }
+  75%      { transform: translateY(-0.22em) rotate(0deg) scale(0.97, 1.05); }
+}
 .hint { position: absolute; bottom: 10px; right: max(16px, env(safe-area-inset-right, 0px)); font-size: 11px; color: var(--mute); pointer-events: none; transition: opacity 0.8s; }
 .hint.gone { opacity: 0; }
 .dot { display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: var(--ember); margin-right: 5px; vertical-align: 1px; box-shadow: 0 0 6px var(--ember); }
@@ -67,7 +87,7 @@ button:focus-visible, input:focus-visible { outline: 1px solid var(--ember); out
 .msg-row { display: flex; gap: 6px; }
 .msg input { flex: 1; min-width: 0; font: inherit; font-size: 16px; color: var(--ink); background: var(--night); border: 1px solid var(--faint); border-radius: 3px; padding: 6px 8px; }
 
-.code { flex: none; height: clamp(140px, 30%, 300px); display: flex; flex-direction: column; background: var(--panel); border-top: 1px solid var(--rule); }
+.code { flex: none; height: clamp(130px, 26%, 300px); display: flex; flex-direction: column; background: var(--panel); border-top: 1px solid var(--rule); }
 .app.code-off .code { display: none; }
 .code header {
   display: flex; justify-content: space-between; gap: 12px; align-items: center;
@@ -101,6 +121,8 @@ button:focus-visible, input:focus-visible { outline: 1px solid var(--ember); out
 }
 @media (prefers-reduced-motion: reduce) {
   #code-pre, .hint { transition: none; }
+  .banner .ch.in { animation: none; }
+  .banner .ch b { transform: none; }
 }
 </style>
 </head>
@@ -125,8 +147,10 @@ button:focus-visible, input:focus-visible { outline: 1px solid var(--ember); out
       </div>
     </form>
 
-    <div class="hud hud-tr"><span class="dot"></span>t <span id="hud-t">0.0</span>s</div>
-    <div class="hud hud-bl">
+    <div class="banner" id="banner" aria-hidden="true"></div>
+
+    <div class="hud hud-tr">
+      <div class="clock"><span class="dot"></span>t <span id="hud-t">0.0</span>s</div>
       <div>rotation <b id="hud-rot">0.00</b>°</div>
       <div>lights · <b id="hud-lights">0</b></div>
       <div>chars · <b id="hud-chars">0</b></div>
@@ -147,8 +171,8 @@ button:focus-visible, input:focus-visible { outline: 1px solid var(--ember); out
 'use strict';
 
 // ── timeline (seconds) ─────────────────────────────────────
-const T_TREE = 0.4, T_TREE_END = 5.0, T_GIFTS = 4.5, T_GARLAND = 4.6;
-const T_STAR = 6.0, T_MSG = 7.0;
+const T_TREE = 0.6, T_TREE_END = 8.6, T_GARLAND = 7.6, T_GIFTS = 8.2;
+const T_STAR = 11.6, T_MSG = 12.8;
 
 // ── scene, in world units (tree height = 1) ────────────────
 const TREE_R = 0.42, TIERS = 6, GROUND_Y = -0.18, STAR_Y = 1.06;
@@ -159,25 +183,26 @@ const [LX, LY, LZ] = norm3(-0.45, 0.62, 0.64);
 const TAU = Math.PI * 2, GOLDEN = Math.PI * (3 - Math.sqrt(5));
 const REDUCED = matchMedia('(prefers-reduced-motion: reduce)').matches;
 const MONO = '"JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace';
-const DEFAULT_MSG = 'MERRY CHRISTMAS';
+const DEFAULT_MSG = 'MERRY CHRISTMAS 2026';
 
 const C = s => s.charCodeAt(0);
 const RAMP = '.:-~^=+*xo%&#@W';
 const RAMP_CODES = Array.from(RAMP, C), RAMP_LEN = RAMP.length;
 const RAY_CODES = Array.from('-/|\\', C);
 const C_STAR = C('*'), C_PLUS = C('+'), C_DOT = C('.'), C_O = C('o');
-const C_TILDE = C('~'), C_AT = C('@'), C_HASH = C('#'), C_UNDER = C('_');
+const C_TILDE = C('~'), C_AT = C('@'), C_HASH = C('#');
 
 const K_LEAF = 0, K_BAUBLE = 1, K_LIGHT = 2, K_GARLAND = 3;   // these grow with the tree
-const K_TRUNK = 4, K_GROUND = 5, K_GIFT = 6, K_RIBBON = 7;
+const K_TRUNK = 4, K_GROUND = 5, K_GIFT = 6, K_RIBBON = 7, K_TOY = 8, K_DARK = 9;   // these drop in
 
 const GIFTS = [
-  { a: 0.075, b: 0.060, c: 0.070, ang: 0.35, dist: 0.50, yaw: 0.3, body: 'red', rib: 'gold' },
-  { a: 0.055, b: 0.080, c: 0.055, ang: 1.45, dist: 0.52, yaw: -0.4, body: 'blue', rib: 'white' },
-  { a: 0.085, b: 0.045, c: 0.060, ang: 2.55, dist: 0.49, yaw: 0.9, body: 'gold', rib: 'red' },
-  { a: 0.060, b: 0.065, c: 0.070, ang: 3.75, dist: 0.51, yaw: 0.2, body: 'green', rib: 'red' },
-  { a: 0.070, b: 0.050, c: 0.065, ang: 4.90, dist: 0.50, yaw: -0.7, body: 'pink', rib: 'white' },
-  { a: 0.045, b: 0.040, c: 0.045, ang: 5.75, dist: 0.61, yaw: 0.5, body: 'red', rib: 'white' },
+  { a: 0.075, b: 0.060, c: 0.070, ang: 0.35, dist: 0.37, yaw: 0.3, body: 'red', rib: 'gold' },
+  { a: 0.055, b: 0.080, c: 0.055, ang: 1.45, dist: 0.38, yaw: -0.4, body: 'blue', rib: 'white' },
+  { a: 0.085, b: 0.045, c: 0.060, ang: 2.55, dist: 0.36, yaw: 0.9, body: 'gold', rib: 'red' },
+  { a: 0.040, b: 0.035, c: 0.040, ang: 2.55, dist: 0.36, yaw: 0.4, lift: 0.09, body: 'cyan', rib: 'gold' },
+  { a: 0.060, b: 0.065, c: 0.070, ang: 3.75, dist: 0.37, yaw: 0.2, body: 'green', rib: 'red' },
+  { a: 0.070, b: 0.050, c: 0.065, ang: 4.90, dist: 0.37, yaw: -0.7, body: 'pink', rib: 'white' },
+  { a: 0.045, b: 0.040, c: 0.045, ang: 5.75, dist: 0.40, yaw: 0.5, body: 'red', rib: 'white' },
 ];
 const BAUBLE_FAMS = ['red', 'red', 'blue', 'gold', 'pink', 'orange', 'blue', 'red'];
 const LIGHT_FAMS = ['gold', 'gold', 'white', 'red', 'blue', 'cyan', 'pink', 'orange', 'gold', 'white'];
@@ -185,8 +210,8 @@ const MSG_FAMS = ['red', 'gold', 'green'];
 
 // ── palette: every family ramps dark → saturated → pale ────
 const FAMILIES = {
-  pine:   ['#03160a', '#1f8f3a', '#b4ff96'],
-  moss:   ['#0f1a03', '#6da61e', '#ecff86'],
+  pine:   ['#04190c', '#2aac48', '#c6ffaa'],
+  moss:   ['#111d04', '#82c028', '#f0ff94'],
   red:    ['#2a0306', '#e8283c', '#ffb4aa'],
   blue:   ['#040b2c', '#2f6dff', '#bcd6ff'],
   gold:   ['#2a1a00', '#f2b11e', '#fff5b8'],
@@ -197,6 +222,9 @@ const FAMILIES = {
   white:  ['#0f131b', '#98a5b8', '#ffffff'],
   brown:  ['#190a03', '#9c4a1f', '#eea474'],
   snow:   ['#080c13', '#55627a', '#e6eeff'],
+  caramel:['#1e1004', '#c47a30', '#ffdba4'],
+  cream:  ['#1c1712', '#d8c4a2', '#fffaf0'],
+  rose:   ['#2a0e14', '#e98ba2', '#ffe2ea'],
 };
 const LEVELS = 16, F = {}, COLORS = [];
 for (const [name, stops] of Object.entries(FAMILIES)) {
@@ -311,8 +339,10 @@ function layout() {
   cellW = ctx.measureText('M').width || fontPx * 0.6;
   cols = Math.ceil(W / cellW); rows = Math.ceil(H / lineH);
   chr = new Uint16Array(cols * rows); clr = new Uint8Array(cols * rows); zb = new Float32Array(cols * rows);
-  scale = Math.min((H * 0.9 - lineH * 5) / 1.62, W * 0.76);
+  fitBanner();
+  scale = Math.min((H * 0.9 - bannerFont * (1.25 * bannerLines + 0.7)) / 1.62, W * 0.72);
   cx = W / 2; cy = H * 0.06 + 0.76 * scale;
+  banner.style.top = Math.round(groundFrontY() + bannerFont * 0.3) + 'px';
   resetAtlas(); buildScene(); makeSnow();
 }
 
@@ -382,7 +412,7 @@ function buildScene() {
     [[0, 1, 0], [1, 0, 0], [0, 0, 1], 'a', 'c', 'b'],
   ];
   GIFTS.forEach((g, gi) => {
-    const gx = g.dist * Math.cos(g.ang), gz = g.dist * Math.sin(g.ang), gy = GROUND_Y + g.b;
+    const gx = g.dist * Math.cos(g.ang), gz = g.dist * Math.sin(g.ang), gy = GROUND_Y + (g.lift || 0) + g.b;
     const cyw = Math.cos(g.yaw), syw = Math.sin(g.yaw);
     for (const [n, U, V, uk, vk, ok] of FACES) {
       const uh = g[uk], vh = g[vk], off = g[ok], top = n[1] === 1;
@@ -403,6 +433,102 @@ function buildScene() {
       add(K_RIBBON, gx + d[0] * 0.022, gy + g.b + 0.012 + d[1] * 0.02, gz + d[2] * 0.022, d, F[g.rib], gi, C('&'));
     }
   });
+
+  // toys: ellipsoids in a local frame that faces away from the trunk (+z)
+  const toyFrame = (ang, dist, turn, k) => {
+    const yaw = ang - Math.PI / 2 + turn;
+    return { x: dist * Math.cos(ang), z: dist * Math.sin(ang), c: Math.cos(yaw), s: Math.sin(yaw), k };
+  };
+  const place = (o, lx, ly, lz) => {
+    lx *= o.k; ly *= o.k; lz *= o.k;
+    return [o.x + lx * o.c - lz * o.s, GROUND_Y + ly, o.z + lx * o.s + lz * o.c];
+  };
+  const blob = (o, key, lx, ly, lz, rx, ry, rz, fam, chars, famOf = null) => {
+    const area = 4 * Math.PI * (rx * ry + rx * rz + ry * rz) / 3;
+    const count = clamp(Math.round(area * o.k * o.k / cell * 2.4), 6, 1400);
+    for (let k = 0; k < count; k++) {
+      const d = randDir(), ln = norm3(d[0] / rx, d[1] / ry, d[2] / rz);
+      const [x, y, z] = place(o, lx + d[0] * rx, ly + d[1] * ry, lz + d[2] * rz);
+      add(K_TOY, x, y, z, [ln[0] * o.c - ln[2] * o.s, ln[1], ln[0] * o.s + ln[2] * o.c],
+          famOf ? famOf(d) : fam, key, C(chars[(Math.random() * chars.length) | 0]));
+    }
+  };
+  const cone = (o, key, lx, ly, lz, r, h, fam, chars) => {
+    const count = clamp(Math.round(Math.PI * r * Math.hypot(r, h) * o.k * o.k / cell * 2.4), 6, 900);
+    for (let k = 0; k < count; k++) {
+      const q = Math.sqrt(Math.random()), a = Math.random() * TAU, ln = norm3(Math.cos(a), r / h, Math.sin(a));
+      const [x, y, z] = place(o, lx + r * q * Math.cos(a), ly + h * (1 - q), lz + r * q * Math.sin(a));
+      add(K_TOY, x, y, z, [ln[0] * o.c - ln[2] * o.s, ln[1], ln[0] * o.s + ln[2] * o.c], fam, key, C(chars[k % chars.length]));
+    }
+  };
+  const dot = (o, key, lx, ly, lz) => {
+    for (let k = 0; k < 6; k++) {
+      const [x, y, z] = place(o, lx + (Math.random() - 0.5) * sx * 0.6 / o.k, ly + (Math.random() - 0.5) * sy * 0.6 / o.k, lz);
+      add(K_DARK, x, y, z, [-o.s, 0, o.c], 0, key, 0);
+    }
+  };
+
+  const teddy = (o, key, fur, light) => {
+    const FUR = '%&@#';
+    blob(o, key, 0, 0.055, 0, 0.05, 0.058, 0.045, fur, FUR);              // body
+    blob(o, key, 0, 0.05, 0.028, 0.03, 0.034, 0.02, light, '@%o');        // belly
+    blob(o, key, 0, 0.132, 0.004, 0.044, 0.04, 0.04, fur, FUR);           // head
+    blob(o, key, -0.033, 0.168, 0, 0.016, 0.016, 0.012, fur, FUR);        // ears
+    blob(o, key, 0.033, 0.168, 0, 0.016, 0.016, 0.012, fur, FUR);
+    blob(o, key, 0, 0.122, 0.036, 0.019, 0.014, 0.012, light, '@o');      // muzzle
+    blob(o, key, -0.054, 0.07, 0.01, 0.016, 0.03, 0.016, fur, FUR);       // arms
+    blob(o, key, 0.054, 0.07, 0.01, 0.016, 0.03, 0.016, fur, FUR);
+    blob(o, key, -0.03, 0.016, 0.035, 0.02, 0.016, 0.03, fur, FUR);       // legs
+    blob(o, key, 0.03, 0.016, 0.035, 0.02, 0.016, 0.03, fur, FUR);
+    blob(o, key, -0.03, 0.016, 0.064, 0.012, 0.012, 0.004, light, 'o@');  // paw pads
+    blob(o, key, 0.03, 0.016, 0.064, 0.012, 0.012, 0.004, light, 'o@');
+    blob(o, key, -0.012, 0.097, 0.04, 0.011, 0.007, 0.006, F.red, '>');   // bow tie
+    blob(o, key, 0.012, 0.097, 0.04, 0.011, 0.007, 0.006, F.red, '<');
+    dot(o, key, -0.016, 0.142, 0.043); dot(o, key, 0.016, 0.142, 0.043);  // eyes
+    dot(o, key, 0, 0.128, 0.05);                                          // nose
+  };
+
+  const snowman = (o, key) => {
+    const SNOW = '@O*o';
+    blob(o, key, 0, 0.05, 0, 0.052, 0.05, 0.052, F.white, SNOW);
+    blob(o, key, 0, 0.122, 0, 0.038, 0.036, 0.038, F.white, SNOW);
+    blob(o, key, 0, 0.182, 0, 0.029, 0.028, 0.029, F.white, SNOW);
+    blob(o, key, 0, 0.152, 0, 0.036, 0.009, 0.036, F.red, '=#');          // scarf
+    blob(o, key, 0.018, 0.13, 0.03, 0.008, 0.022, 0.006, F.red, '#|');
+    blob(o, key, 0, 0.18, 0.038, 0.006, 0.006, 0.016, F.orange, '>');     // carrot
+    cone(o, key, 0, 0.205, 0, 0.026, 0.05, F.red, '#%');                  // santa hat
+    blob(o, key, 0, 0.206, 0, 0.03, 0.007, 0.03, F.white, '=@');
+    blob(o, key, 0, 0.258, 0, 0.009, 0.009, 0.009, F.white, '@');
+    for (let k = 0; k < 7; k++) {                                         // twig arms
+      const q = k / 6;
+      blob(o, key, 0.036 + q * 0.05, 0.125 + q * 0.03, 0, 0.005, 0.005, 0.005, F.brown, '/');
+      blob(o, key, -0.036 - q * 0.05, 0.125 + q * 0.03, 0, 0.005, 0.005, 0.005, F.brown, '\\');
+    }
+    dot(o, key, -0.011, 0.19, 0.027); dot(o, key, 0.011, 0.19, 0.027);   // coal eyes
+    dot(o, key, 0, 0.122, 0.04); dot(o, key, 0, 0.104, 0.039); dot(o, key, 0, 0.07, 0.053);
+  };
+
+  const candyCane = (o, key, lean) => {
+    const path = [];
+    for (let s = 0; s <= 0.17; s += 0.009) path.push([0, s]);
+    for (let a = Math.PI; a >= -0.35; a -= 0.3) path.push([0.028 + 0.028 * Math.cos(a), 0.17 + 0.028 * Math.sin(a)]);
+    path.forEach(([px, py], i) => {
+      const lx = px * Math.cos(lean) - py * Math.sin(lean), ly = px * Math.sin(lean) + py * Math.cos(lean);
+      blob(o, key, lx, ly + 0.012, 0, 0.012, 0.012, 0.012, (i >> 1) % 2 ? F.white : F.red, '#@%');
+    });
+  };
+
+  const BALL = ['red', 'white', 'blue', 'gold', 'green', 'white'];
+  const ball = (o, key) => blob(o, key, 0, 0.042, 0, 0.042, 0.042, 0.042, 0, '@#%',
+    d => Math.abs(d[1]) > 0.88 ? F.white : F[BALL[Math.floor((Math.atan2(d[2], d[0]) + Math.PI) / TAU * 6) % 6]]);
+
+  let toy = GIFTS.length;                    // toys drop in after the gifts
+  teddy(toyFrame(0.9, 0.5, 0.15, 1.7), toy++, F.caramel, F.cream);
+  candyCane(toyFrame(2.0, 0.49, 0, 1.5), toy++, 0.35);
+  snowman(toyFrame(3.15, 0.5, 0, 1.45), toy++);
+  teddy(toyFrame(4.32, 0.5, -0.15, 1.7), toy++, F.rose, F.cream);
+  candyCane(toyFrame(5.33, 0.48, 0, 1.5), toy++, -0.3);
+  ball(toyFrame(6.05, 0.52, 0, 1.4), toy++);
 
   // a thin disc of snow on the ground
   const nGround = Math.round(Math.PI * 0.72 * 0.72 / cell * 0.1);
@@ -447,8 +573,8 @@ function drawSnow(t, dt) {
 
 // ── the tree: rotate, tilt, project, z-test, shade ─────────
 function drawTree(t) {
-  const grow = easeInOut((t - T_TREE) / (T_TREE_END - T_TREE)) * 1.09;
-  const garland = clamp((t - T_GARLAND) / 1.6, 0, 1) * 1.09;
+  const grow = smooth((t - T_TREE) / (T_TREE_END - T_TREE)) * 1.09;
+  const garland = clamp((t - T_GARLAND) / 2.2, 0, 1) * 1.09;
   const base = (t - 0.1) / 0.5;
   const cr = Math.cos(rot), sr = Math.sin(rot);
   const { n, kind, x: PX, y: PY, z: PZ, nx: NX, ny: NY, nz: NZ, fam, key, ch, rnd, ph } = P;
@@ -467,7 +593,7 @@ function drawTree(t) {
         c = Math.cos(rot - 1.8 * f); s = Math.sin(rot - 1.8 * f);
       }
     } else if (k >= K_GIFT) {
-      const p = (t - T_GIFTS - key[i] * 0.17) / 0.75;
+      const p = (t - T_GIFTS - key[i] * 0.25) / 0.85;
       if (p <= 0) continue;
       if (p < 1) y += (1 - bounceOut(p)) * 0.9;   // dropped in, with a bounce
     } else if (rnd[i] > base) continue;
@@ -493,17 +619,17 @@ function drawTree(t) {
       color = tint(F.white, 0.55 + 0.45 * (1 - fresh));
       z2 += 0.02;
     } else if (k === K_LEAF) {
-      let b = 0.14 + 0.8 * lam + (r - 0.5) * 0.24;
-      if (nzc < 0) b *= 0.5;
+      let b = 0.24 + 0.76 * lam + (r - 0.5) * 0.24;
+      if (nzc < 0) b *= 0.62;
       if (ph[i] < 0.42 && nzc > 0.15 && Math.sin(t * (0.8 + r * 3) + ph[i] * 40) > 0.986) {
         code = C_STAR; color = tint(F.white, 1); z2 += 0.03;   // bling
       } else {
         code = RAMP_CODES[clamp((b * 0.7 + r * 0.45 + 0.02) * RAMP_LEN | 0, 0, RAMP_LEN - 1)];
-        color = tint(fam[i], 0.3 + 0.75 * b);
+        color = tint(fam[i], 0.4 + 0.72 * b);
       }
     } else if (k === K_BAUBLE) {
       if (lam > 0.9 && nzc > 0.45) { code = C_STAR; color = tint(F.white, 1); }
-      else { code = ch[i]; color = tint(fam[i], 0.25 + 0.75 * lam + 0.08 * Math.sin(t * 2 + ph[i])); }
+      else { code = ch[i]; color = tint(fam[i], 0.36 + 0.7 * lam + 0.08 * Math.sin(t * 2 + ph[i])); }
       z2 += 0.01;
     } else if (k === K_LIGHT) {
       let v = 0.5 + 0.5 * Math.sin(t * (1.1 + r * 2.6) + ph[i]);
@@ -514,17 +640,21 @@ function drawTree(t) {
     } else if (k === K_GARLAND) {
       const chase = 0.5 + 0.5 * Math.sin(key[i] * 70 - t * 6);
       code = chase > 0.86 ? C_STAR : C_TILDE;
-      color = tint(F.gold, (0.3 + 0.7 * lam) * (0.55 + 0.45 * chase) + 0.15);
+      color = tint(F.gold, (0.3 + 0.7 * lam) * (0.55 + 0.45 * chase) + 0.25);
       z2 += 0.01;
     } else if (k === K_TRUNK) {
-      code = ch[i]; color = tint(F.brown, 0.2 + 0.75 * lam);
+      code = ch[i]; color = tint(F.brown, 0.3 + 0.7 * lam);
     } else if (k === K_GROUND) {
       if (ph[i] < 0.3 && Math.sin(t * 2 + ph[i] * 30) > 0.97) { code = C_STAR; color = tint(F.white, 0.9); }
       else { code = ch[i]; color = tint(F.snow, 0.12 + 0.3 * r + 0.25 * clamp(zc, 0, 1)); }
     } else if (k === K_GIFT) {
-      code = ch[i]; color = tint(fam[i], 0.18 + 0.82 * lam + (r - 0.5) * 0.12);
+      code = ch[i]; color = tint(fam[i], 0.3 + 0.75 * lam + (r - 0.5) * 0.12);
+    } else if (k === K_TOY) {
+      code = ch[i]; color = tint(fam[i], 0.32 + 0.72 * lam + (r - 0.5) * 0.1);
+    } else if (k === K_DARK) {
+      code = 0; color = 0; z2 += 0.02;      // eyes, noses, buttons: a dark gap
     } else {
-      code = ch[i]; color = tint(fam[i], 0.4 + 0.6 * lam);
+      code = ch[i]; color = tint(fam[i], 0.5 + 0.5 * lam);
     }
 
     if (z2 <= zb[idx]) continue;
@@ -596,49 +726,46 @@ function drawSparks(dt) {
   }
 }
 
-// ── the message, typed out under the tree ──────────────────
-function messageLines() {
-  const txt = message.toLocaleUpperCase(), avail = cols - 8;
-  const spaced = Array.from(txt).join(' ');
-  if (spaced.length <= avail) return [spaced];
-  if (txt.length <= avail) return [txt];
-  let cut = txt.lastIndexOf(' ', txt.length / 2);
-  if (cut < 1) cut = txt.indexOf(' ', txt.length / 2);
-  if (cut < 1) cut = Math.floor(txt.length / 2);
-  return [txt.slice(0, cut).trim(), txt.slice(cut).trim()].map(l => l.slice(0, avail));
+// ── the greeting: letters pop in left to right, then dance ──
+const BANNER_COLORS = ['#ff4d5e', '#ff9a3c', '#ffd84a', '#a6ff5c', '#35e07a', '#3fe0d0', '#5aa8ff', '#ad8cff', '#ff6fd0'];
+const banner = document.getElementById('banner');
+let bannerSpans = [], bannerFont = 24, bannerLines = 1, bannerShown = -1;
+
+function fitBanner() {
+  const txt = message.normalize('NFC').toLocaleUpperCase();
+  const width = s => Array.from(s).reduce((n, ch) => n + (ch === ' ' ? 0.45 : 0.66), 0);
+  const avail = Math.max(120, W - 32);
+  let lines = [txt], size = avail / width(txt);
+  if (size < 20 && txt.includes(' ')) {             // too small on one line: break it in two
+    let cut = txt.lastIndexOf(' ', txt.length / 2);
+    if (cut < 1) cut = txt.indexOf(' ', txt.length / 2);
+    lines = [txt.slice(0, cut).trim(), txt.slice(cut).trim()];
+    size = avail / Math.max(...lines.map(width));
+  }
+  bannerFont = clamp(size, 12, Math.min(46, H * 0.075));
+  bannerLines = lines.length;
+  let i = 0;
+  banner.innerHTML = lines.map(line => '<div class="row">' + Array.from(line).map(ch => {
+    if (ch === ' ') return '<span class="sp"></span>';
+    const c = BANNER_COLORS[i % BANNER_COLORS.length];
+    return '<span class="ch" style="--i:' + i++ + ';--c:' + c + ';--g:' + c + 'a6"><b>' + esc(ch) + '</b></span>';
+  }).join('') + '</div>').join('');
+  banner.style.fontSize = bannerFont + 'px';
+  bannerSpans = Array.from(banner.querySelectorAll('.ch'));
+  bannerShown = -1;
 }
 
-function messageRow() {
-  const y0 = GROUND_Y - YC, zr = 0.72;
+function groundFrontY() {
+  const y0 = GROUND_Y - YC, zr = 0.66;
   const yc = y0 * COS_P - zr * SIN_P, zc = y0 * SIN_P + zr * COS_P;
-  return Math.floor((cy - yc * (DIST / (DIST - zc)) * scale) / lineH) + 2;
+  return cy - yc * (DIST / (DIST - zc)) * scale;
 }
 
 function drawMessage(t) {
-  if (t < msgT0) return;
-  const lines = messageLines();
-  const row0 = Math.min(messageRow(), rows - 2 - (lines.length - 1) * 2);
-  let shown = Math.floor((t - msgT0) * 12), cursor = shown < lines.join('').length;
-  lines.forEach((line, li) => {
-    const chars = Array.from(line), row = row0 + li * 2;
-    const x0 = Math.floor((cols - chars.length) / 2);
-    const visible = clamp(shown, 0, chars.length);
-    if (visible > 0 || cursor) {
-      for (let r = row - 1; r <= row + 1; r++) for (let c = x0 - 3; c < x0 + visible + 3; c++) {
-        if (r >= 0 && c >= 0 && r < rows && c < cols) { chr[r * cols + c] = 0; zb[r * cols + c] = 1e9; }
-      }
-    }
-    for (let j = 0; j < visible; j++) {
-      if (chars[j] === ' ') continue;
-      const fam = F[MSG_FAMS[(Math.floor(j / 2) + Math.floor(t * 1.5)) % 3]];
-      put(x0 + j, row, chars[j].codePointAt(0), tint(fam, 0.86 + 0.14 * Math.sin(t * 4 + j * 0.7)), 2e9);
-    }
-    if (cursor && shown >= 0 && shown < chars.length && (t * 3) % 1 < 0.6) {
-      put(x0 + visible, row, C_UNDER, tint(F.white, 0.8), 2e9);
-      cursor = false;
-    }
-    shown -= chars.length;
-  });
+  const shown = t < msgT0 ? 0 : Math.min(bannerSpans.length, Math.floor((t - msgT0) * 6) + 1);
+  if (shown === bannerShown) return;
+  bannerSpans.forEach((el, i) => el.classList.toggle('in', i < shown));
+  bannerShown = shown;
 }
 
 // ── blit the grid ──────────────────────────────────────────
@@ -669,7 +796,7 @@ function frame(now) {
   const real = (now - last) / 1000, dt = Math.min(0.05, real);
   last = now;
   t = (now - t0) / 1000;
-  const speed = REDUCED ? 0.15 : 0.5 + 1.7 * (1 - smooth(t / 7));
+  const speed = REDUCED ? 0.15 : 0.45 + 1.0 * (1 - smooth(t / 12));
   if (drag) spin *= Math.exp(-dt * 6);
   else { rot += (speed + spin) * dt; spin *= Math.exp(-dt * 1.5); }
 
@@ -709,7 +836,7 @@ function hud(t, drawn, real) {
   hudClock = 0;
   $t.textContent = t.toFixed(1);
   $rot.textContent = (((rot * 180 / Math.PI) % 360 + 360) % 360).toFixed(2);
-  $lights.textContent = Math.min(LIGHTS, Math.round(LIGHTS * clamp(easeInOut((t - T_TREE) / (T_TREE_END - T_TREE)) * 1.09, 0, 1)));
+  $lights.textContent = Math.min(LIGHTS, Math.round(LIGHTS * clamp(smooth((t - T_TREE) / (T_TREE_END - T_TREE)) * 1.09, 0, 1)));
   $chars.textContent = drawn.toLocaleString('en-US');
   if (!dragged && t > 12) $hint.classList.add('gone');
 }
@@ -774,8 +901,8 @@ function updateCode(t, dt) {
 }
 
 // ── controls ───────────────────────────────────────────────
-function loadMessage() { try { return localStorage.getItem('ascii-tree-msg') || DEFAULT_MSG; } catch (e) { return DEFAULT_MSG; } }
-function saveMessage(m) { try { localStorage.setItem('ascii-tree-msg', m); } catch (e) { /* private mode */ } }
+function loadMessage() { try { return localStorage.getItem('ascii-tree-msg-v2') || DEFAULT_MSG; } catch (e) { return DEFAULT_MSG; } }
+function saveMessage(m) { try { localStorage.setItem('ascii-tree-msg-v2', m); } catch (e) { /* private mode */ } }
 
 function replay() {
   t0 = performance.now(); sparked = false; sparks.length = 0; msgT0 = T_MSG; codeSec = '';
@@ -798,6 +925,7 @@ form.addEventListener('submit', e => {
   saveMessage(message);
   msgT0 = Math.max(t, T_MSG);
   form.hidden = true;
+  layout();
 });
 
 const btnFull = document.getElementById('btn-full');
