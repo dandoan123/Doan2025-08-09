@@ -29,10 +29,6 @@
   --str: #9bdc85;
   --const: #d7a6ff;
   --com: #46536a;
-  --plate: #000000;
-  --frame: #e9c46a;
-  --frame-dim: #6e5c2e;
-  --frame-glow: rgba(255, 200, 90, 0.2);
   --mono: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, Consolas, monospace;
   color-scheme: dark;
 }
@@ -52,33 +48,24 @@ body { height: 100%; margin: 0; overflow: hidden; background: var(--night); colo
 .hud-tr { top: 12px; right: max(16px, env(safe-area-inset-right, 0px)); display: grid; justify-items: end; gap: 1px; }
 .hud-tr .clock { color: var(--ember); margin-bottom: 2px; }
 
-/* the greeting: a framed black plate with its own snowfall; real letters, each its own colour */
-.banner { position: absolute; left: 0; right: 0; top: 0; display: grid; justify-items: center;
+/* the greeting: real letters over the grid, each its own colour, dancing on its own beat */
+.banner { position: absolute; left: 0; right: 0; top: 0; display: grid; justify-items: center; row-gap: 0.2em;
   padding-left: max(16px, env(safe-area-inset-left, 0px)); padding-right: max(16px, env(safe-area-inset-right, 0px));
   font-family: var(--mono); font-weight: 600; line-height: 1.1; pointer-events: none; }
-.plate { position: relative; overflow: hidden; padding: 0.62em 0.9em 0.42em; background: var(--plate);
-  border: 1px solid var(--frame); border-radius: 0.28em;
-  box-shadow: 0 0 0 0.14em var(--plate), 0 0 0 calc(0.14em + 1px) var(--frame-dim), 0 0 1.4em var(--frame-glow);
-  opacity: 0; transform: translateY(0.3em) scale(0.97); transition: opacity 0.6s ease-out, transform 0.6s ease-out; }
-.banner.show .plate { opacity: 1; transform: none; }
-#plate-snow { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
-.words { position: relative; display: grid; justify-items: center; row-gap: 0.15em; }
 .banner .row { display: flex; align-items: flex-end; white-space: nowrap; }
 .banner .sp { display: inline-block; width: 0.45em; }
 .banner .ch { display: inline-block; width: 0.66em; text-align: center; transform-origin: 50% 85%; }
-.banner .ch b { position: relative; display: inline-block; font-weight: 600; color: var(--c);
+.banner .ch b { display: inline-block; font-weight: 600; color: var(--c);
   text-shadow: 0 0 0.1em var(--c), 0 0 0.45em var(--g), 0 0 1em var(--g);
-  opacity: 0; transform: translate(0.8em, -0.2em) scale(0.3) rotate(20deg);
-  transition: opacity 0.35s ease-out, transform 0.55s cubic-bezier(0.3, 1.4, 0.5, 1); }
+  opacity: 0; transform: translate(1.2em, -0.3em) scale(0.2) rotate(30deg);
+  transition: opacity 0.35s ease-out, transform 0.6s cubic-bezier(0.3, 1.7, 0.5, 1); }
 .banner .ch.in b { opacity: 1; transform: none; }
-.banner .ch.in { animation: dance 1.6s ease-in-out infinite; animation-delay: calc(var(--i) * -0.16s); }
-.banner .hat { position: absolute; left: -0.08em; top: -0.42em; width: 0.84em; height: auto; overflow: visible;
-  transform: rotate(16deg); transform-origin: 30% 90%; filter: drop-shadow(0 0 0.08em rgba(255, 90, 100, 0.7)); }
+.banner .ch.in { animation: dance 1.2s ease-in-out infinite; animation-delay: calc(var(--i) * -0.14s); }
 @keyframes dance {
-  0%, 100% { transform: translateY(0) rotate(-4deg); }
-  25%      { transform: translateY(-0.12em) rotate(0deg); }
-  50%      { transform: translateY(0) rotate(4deg); }
-  75%      { transform: translateY(-0.08em) rotate(0deg); }
+  0%, 100% { transform: translateY(0) rotate(-8deg) scale(1.04, 0.94); }
+  25%      { transform: translateY(-0.3em) rotate(0deg) scale(0.96, 1.06); }
+  50%      { transform: translateY(0) rotate(8deg) scale(1.04, 0.94); }
+  75%      { transform: translateY(-0.22em) rotate(0deg) scale(0.97, 1.05); }
 }
 .hint { position: absolute; bottom: 10px; right: max(16px, env(safe-area-inset-right, 0px)); font-size: 11px; color: var(--mute); pointer-events: none; transition: opacity 0.8s; }
 .hint.gone { opacity: 0; }
@@ -160,12 +147,7 @@ button:focus-visible, input:focus-visible { outline: 1px solid var(--ember); out
       </div>
     </form>
 
-    <div class="banner" id="banner" aria-hidden="true">
-      <div class="plate" id="plate">
-        <canvas id="plate-snow"></canvas>
-        <div class="words" id="words"></div>
-      </div>
-    </div>
+    <div class="banner" id="banner" aria-hidden="true"></div>
 
     <div class="hud hud-tr">
       <div class="clock"><span class="dot"></span>t <span id="hud-t">0.0</span>s</div>
@@ -358,9 +340,9 @@ function layout() {
   cols = Math.ceil(W / cellW); rows = Math.ceil(H / lineH);
   chr = new Uint16Array(cols * rows); clr = new Uint8Array(cols * rows); zb = new Float32Array(cols * rows);
   fitBanner();
-  scale = Math.min((H * 0.9 - bannerFont * (1.15 * bannerLines + 1.5)) / 1.62, W * 0.72);
+  scale = Math.min((H * 0.9 - bannerFont * (1.25 * bannerLines + 0.7)) / 1.62, W * 0.72);
   cx = W / 2; cy = H * 0.06 + 0.76 * scale;
-  banner.style.top = Math.round(groundFrontY() + bannerFont * 0.15) + 'px';
+  banner.style.top = Math.round(groundFrontY() + bannerFont * 0.3) + 'px';
   resetAtlas(); buildScene(); makeSnow();
 }
 
@@ -744,74 +726,33 @@ function drawSparks(dt) {
   }
 }
 
-// ── the greeting: a framed plate, letters pop in left to right, then sway ──
+// ── the greeting: letters pop in left to right, then dance ──
 const BANNER_COLORS = ['#ff4d5e', '#ff9a3c', '#ffd84a', '#a6ff5c', '#35e07a', '#3fe0d0', '#5aa8ff', '#ad8cff', '#ff6fd0'];
-const HAT_SVG = '<svg class="hat" viewBox="0 0 42 34" aria-hidden="true">'
-  + '<path d="M4 27 Q9 9 24 5 Q34 3 37 14 Q31 9 27 12 Q31 19 35 27 Z" fill="#e8283c"/>'
-  + '<path d="M27 12 Q31 19 35 27 L29 27 Q27 19 24 14 Z" fill="#a8141f"/>'
-  + '<rect x="2" y="24" width="36" height="8" rx="4" fill="#ffffff"/>'
-  + '<circle cx="37" cy="14" r="4" fill="#ffffff"/></svg>';
-const banner = document.getElementById('banner'), words = document.getElementById('words');
-const plate = document.getElementById('plate'), plateSnow = document.getElementById('plate-snow');
-const pctx = plateSnow.getContext('2d');
-let bannerSpans = [], bannerFont = 24, bannerLines = 1, bannerShown = -1, bannerOn = false;
-let plateW = 0, plateH = 0, plateFlakes = [];
+const banner = document.getElementById('banner');
+let bannerSpans = [], bannerFont = 24, bannerLines = 1, bannerShown = -1;
 
 function fitBanner() {
   const txt = message.normalize('NFC').toLocaleUpperCase();
   const width = s => Array.from(s).reduce((n, ch) => n + (ch === ' ' ? 0.45 : 0.66), 0);
-  const avail = Math.min(W - 40, 760) * 0.9;
-  let lines = [txt], size = avail / (width(txt) + 1.8);
+  const avail = Math.min(W - 40, 760) * 0.78;
+  let lines = [txt], size = avail / width(txt);
   if (size < 15 && txt.includes(' ')) {             // too small on one line: break it in two
     let cut = txt.lastIndexOf(' ', txt.length / 2);
     if (cut < 1) cut = txt.indexOf(' ', txt.length / 2);
     lines = [txt.slice(0, cut).trim(), txt.slice(cut).trim()];
-    size = avail / (Math.max(...lines.map(width)) + 1.8);
+    size = avail / Math.max(...lines.map(width));
   }
   bannerFont = clamp(size, 11, Math.min(32, H * 0.055));
   bannerLines = lines.length;
-  const letters = Array.from(lines.join('')).filter(ch => ch !== ' ').length;
   let i = 0;
-  words.innerHTML = lines.map(line => '<div class="row">' + Array.from(line).map(ch => {
+  banner.innerHTML = lines.map(line => '<div class="row">' + Array.from(line).map(ch => {
     if (ch === ' ') return '<span class="sp"></span>';
-    const c = BANNER_COLORS[i % BANNER_COLORS.length], hat = i === letters - 1 ? HAT_SVG : '';
-    return '<span class="ch" style="--i:' + i++ + ';--c:' + c + ';--g:' + c + 'a6"><b>' + esc(ch) + hat + '</b></span>';
+    const c = BANNER_COLORS[i % BANNER_COLORS.length];
+    return '<span class="ch" style="--i:' + i++ + ';--c:' + c + ';--g:' + c + 'a6"><b>' + esc(ch) + '</b></span>';
   }).join('') + '</div>').join('');
   banner.style.fontSize = bannerFont + 'px';
-  bannerSpans = Array.from(words.querySelectorAll('.ch'));
+  bannerSpans = Array.from(banner.querySelectorAll('.ch'));
   bannerShown = -1;
-}
-
-// snow that falls only inside the plate
-new ResizeObserver(() => {
-  plateW = plate.clientWidth; plateH = plate.clientHeight;
-  const r = Math.min(window.devicePixelRatio || 1, 2);
-  plateSnow.width = Math.max(1, Math.round(plateW * r)); plateSnow.height = Math.max(1, Math.round(plateH * r));
-  pctx.setTransform(r, 0, 0, r, 0, 0);
-  pctx.textAlign = 'center'; pctx.textBaseline = 'middle';
-  plateFlakes = Array.from({ length: Math.round(plateW * plateH / 260) }, () => plateFlake(Math.random() * plateH))
-    .sort((a, b) => a.size - b.size);
-}).observe(plate);
-
-function plateFlake(y) {
-  const d = Math.random();
-  return { x: Math.random() * plateW, y, d, v: 8 + d * 24, ph: Math.random() * TAU,
-           size: d > 0.75 ? 13 : d > 0.4 ? 10 : 8, ch: d > 0.75 ? '*' : d > 0.4 ? '+' : '.' };
-}
-
-function drawPlateSnow(t, dt) {
-  if (!bannerOn || !plateW) return;
-  pctx.clearRect(0, 0, plateW, plateH);
-  const fall = REDUCED ? 0.3 : 1;
-  let size = 0;
-  for (const f of plateFlakes) {
-    f.y += f.v * dt * fall;
-    f.x += Math.sin(t * 0.9 + f.ph) * (4 + f.d * 8) * dt * fall;
-    if (f.y > plateH + 8) { const fresh = plateFlake(-8); f.x = fresh.x; f.y = fresh.y; f.ph = fresh.ph; }
-    if (f.size !== size) { size = f.size; pctx.font = size + 'px ' + MONO; }
-    pctx.fillStyle = 'rgba(225, 236, 255, ' + (0.22 + 0.55 * f.d * (0.75 + 0.25 * Math.sin(t * 2 + f.ph))).toFixed(2) + ')';
-    pctx.fillText(f.ch, f.x, f.y);
-  }
 }
 
 function groundFrontY() {
@@ -821,9 +762,7 @@ function groundFrontY() {
 }
 
 function drawMessage(t) {
-  const on = t >= msgT0;
-  if (on !== bannerOn) { bannerOn = on; banner.classList.toggle('show', on); }
-  const shown = t < msgT0 + 0.5 ? 0 : Math.min(bannerSpans.length, Math.floor((t - msgT0 - 0.5) * 6) + 1);
+  const shown = t < msgT0 ? 0 : Math.min(bannerSpans.length, Math.floor((t - msgT0) * 6) + 1);
   if (shown === bannerShown) return;
   bannerSpans.forEach((el, i) => el.classList.toggle('in', i < shown));
   bannerShown = shown;
@@ -867,7 +806,6 @@ function frame(now) {
   drawStar(t, dt);
   drawSparks(dt);
   drawMessage(t);
-  drawPlateSnow(t, dt);
   const drawn = render();
 
   hud(t, drawn, real);
