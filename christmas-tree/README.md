@@ -1,6 +1,6 @@
 # Cây thông ASCII
 
-Cây thông Noel 3D vẽ bằng ký tự ASCII. Cây tự dựng từ gốc lên ngọn (khoảng 8 giây), rồi xoay tròn với đèn nháy, ngôi sao lóe sáng, hộp quà, gấu bông, người tuyết, kẹo gậy và tuyết rơi. Cuối cùng dòng chữ "MERRY CHRISTMAS 2026" hiện ra từng chữ, mỗi chữ một màu và nhún nhảy. Tất cả nằm trong một file duy nhất: `index.html`.
+Cây thông Noel 3D vẽ bằng ký tự ASCII. Cây tự dựng từ gốc lên ngọn (khoảng 8 giây), rồi xoay tròn với đèn nháy, ngôi sao lóe sáng, hộp quà, gấu bông, người tuyết, kẹo gậy và tuyết rơi. Cuối cùng dòng chữ "MERRY CHRISTMAS 2026" hiện ra từng chữ trong một khung nền đen có tuyết rơi, mỗi chữ một màu, lắc lư nhẹ, và chữ cuối đội mũ ông già Noel. Tất cả nằm trong một file duy nhất: `index.html`.
 
 ## Chạy
 
